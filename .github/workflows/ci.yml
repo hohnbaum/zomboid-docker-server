@@ -1,0 +1,19 @@
+name: Synthetic validation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --requirement discord/requirements.lock
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q ops server discord scripts tests
+      - run: python scripts/audit-public-tree.py --history
+      - run: docker compose --profile discord --profile tools config --format json | python scripts/check-compose.py
