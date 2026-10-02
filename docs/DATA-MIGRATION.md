@@ -100,6 +100,10 @@ complete pending plan/history replay. Stale control paths cannot be introduced
 through an edited manifest. Imported restored backups keep the migration gate
 and receive verified restored-pristine evidence.
 
+The copied staging tree is hashed again against the archive manifest before any
+target publication. Copied files and Linux directories are synced before writing
+the restore journal. Copy corruption is refused as RESTORE_COPY_MISMATCH.
+
 Publication is staged and journaled, leaving desired=false. Multi-directory
 replacement is not an atomic volume switch. Interrupted restore preserves its
 journal/staging and blocks startup. Restoring the original verified archive into a

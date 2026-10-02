@@ -73,9 +73,14 @@ ProjectZomboid64.json; the agent sets Xms/Xmx in that file and passes server nam
 and Linux cachedir to the launcher. It uses the packaged Java runtime.
 
 Steam build comes from appmanifest_380870.acf. Version evidence is taken only
-from the current agent launch-log offset and tied to that build. Copied console
+from the first PZ version= line after the current agent launch-log offset and tied
+to that build. Later mod version messages cannot replace it. Copied console
 logs and previous-build evidence cannot satisfy the imported-world gate.
 Imported data initially requires exactly 42.21.0 and pristine verification.
+An installation-in-progress marker invalidates version evidence and blocks game
+start until an explicit installation succeeds. Agent stdout is filtered before
+writing the private game log to mask the configured game, RCON and synthetic
+bootstrap admin secrets, including values split across read chunks.
 
 READY requires the current owned game process, configured owned UDP listeners,
 authenticated RCON and a parseable player count. Internet/Steam availability is

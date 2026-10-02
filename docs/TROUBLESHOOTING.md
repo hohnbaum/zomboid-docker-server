@@ -44,6 +44,11 @@ a verified clean shutdown. Avoid `docker compose restart` while busy jobs run.
 
 ## Version and Workshop
 
+`APP_INSTALL_INCOMPLETE`: a Steam installation failed or was interrupted. Keep the
+game stopped, inspect the private installation log and retry `pz install`.
+Start remains blocked until a successful installer clears the marker. A changed
+build requires new Linux startup version evidence before importing-world start.
+
 `BLOCKED_VERSION`: the private imported marker requires 42.21.0 but this Steam
 build has another version or lacks current Linux startup evidence. Do not change
 the marker to force a test. A synthetic empty-world run may establish the current
@@ -57,6 +62,12 @@ returns before/after manifest evidence and unresolved items. No upstream Worksho
 change triggers automatic restart by itself. READY alone does not establish every
 mod's functional correctness. Check case-sensitive paths, missing scripts, Lua,
 model/media errors and compare with the prior platform's baseline.
+
+For a 6 GiB imported-world heap, measure both host free RAM and Docker memory
+before starting. Leave additional room for the JVM's native allocations and host
+applications. Do not infer host headroom from guest MemAvailable alone or lower
+the imported-world heap merely to complete acceptance. A disposable empty test
+may use a separately configured 2 GiB heap.
 
 ## Journals and interrupted jobs
 

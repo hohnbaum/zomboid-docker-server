@@ -109,12 +109,20 @@ the authenticated private ops API; it has no world data, RCON credential or sock
 
 ## Validation and documentation
 
-Implementation validation is in progress. The Linux public download reports
-42.21.0 / Steam build 25485538. Empty-world READY, graceful stop and stopped intent
-across service restart have passed. The initial 65 synthetic tests pass on Windows
-(one symlink privilege skip). Imported-world, restored-world and human client
-acceptance are not yet complete. Final evidence belongs in
-[TEST-REPORT.md](docs/TEST-REPORT.md).
+The 96 synthetic tests pass on Linux, including optional Discord dependencies.
+Windows passes with five platform/dependency skips. The downloaded Linux server
+is **42.21.0 / Steam build 25485538**. Empty-world READY, graceful stop, persisted
+intent, an explicit offline update, and a new-volume restore followed by READY
+have passed with a disposable 2 GiB heap.
+
+The private imported world was copied and hashed, its three SQLite databases
+checked, and a protected pristine backup created. All 111 configured Workshop
+items downloaded and report Current; all 137 configured mod IDs have exact
+mod.info definitions. **Imported-world runtime integration is not yet completed:**
+the host has insufficient comfortable headroom for its required 6 GiB heap.
+Mod loading, case-sensitive media/Lua behavior, and human client/account/world
+acceptance remain unproven. Live Discord acceptance also requires private
+credentials. See [TEST-REPORT.md](docs/TEST-REPORT.md) for evidence and limitations.
 
 Read [architecture](docs/ARCHITECTURE.md), [migration](docs/DATA-MIGRATION.md),
 [mod lifecycle](docs/MOD-PLAN-LIFECYCLE.md), [Linux handoff](docs/LINUX-HANDOFF.md)
@@ -125,3 +133,7 @@ Run `python -m unittest discover -s tests -v` and
 `python scripts/audit-public-tree.py --history` before publishing. Git contains
 code and synthetic tests only. World data, configuration credentials, tokens,
 logs, backup archives and deployment `.env` stay private.
+
+When using multiple private deployments, put `--env-file DEPLOYMENT.env` before
+the wrapper command, and pass the same file to Compose:
+`docker compose --env-file DEPLOYMENT.env up -d pz-server pz-ops`.
