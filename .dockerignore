@@ -1,0 +1,13 @@
+**
+!ops
+!ops/**
+!server
+!server/**
+!discord
+!discord/**
+!scripts
+!scripts/**
+!LICENSE
+**/__pycache__
+**/*.pyc
+**/.venv

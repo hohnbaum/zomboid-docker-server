@@ -1,0 +1,141 @@
+name: ${COMPOSE_PROJECT_NAME:-pzdev}
+x-settings: &settings
+  PZ_SERVER_NAME: ${PZ_SERVER_NAME:-pztest}
+  PZ_HEAP: ${PZ_HEAP:-6g}
+  PZ_READY_TIMEOUT: ${PZ_READY_TIMEOUT:-1200}
+  PZ_REQUIRED_IMPORT_VERSION: ${PZ_REQUIRED_IMPORT_VERSION:-42.21.0}
+services:
+  pz-init:
+    image: ${COMPOSE_PROJECT_NAME:-pzdev}-ops:local
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    user: "0:0"
+    command: [python, -m, pzops.bootstrap, volumes]
+    network_mode: none
+    volumes:
+      - data:/pz/data
+      - state:/pz/state
+      - app:/pz/app
+      - workshop:/pz/app/steamapps/workshop
+      - control:/pz/control
+      - backups:/pz/backups
+      - logs:/pz/logs
+  pz-server:
+    image: ${COMPOSE_PROJECT_NAME:-pzdev}-server:local
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 90s
+    environment: *settings
+    depends_on:
+      pz-init:
+        condition: service_completed_successfully
+    volumes:
+      - app:/pz/app
+      - workshop:/pz/app/steamapps/workshop
+      - data:/pz/data
+      - control:/pz/control
+      - logs:/pz/logs
+    ports:
+      - "${PZ_BIND_ADDRESS:-127.0.0.1}:${PZ_HOST_PORT:-16261}:16261/udp"
+      - "${PZ_BIND_ADDRESS:-127.0.0.1}:${PZ_HOST_UDP_PORT:-16262}:16262/udp"
+    networks: [control, game]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, python3, -m, pzops.agent_client, ping]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  pz-ops:
+    image: ${COMPOSE_PROJECT_NAME:-pzdev}-ops:local
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *settings
+      PZ_ADVERTISE_LAN: ${PZ_ADVERTISE_LAN:-}
+      PZ_ADVERTISE_VPN: ${PZ_ADVERTISE_VPN:-}
+      PZ_ADVERTISE_PUBLIC: ${PZ_ADVERTISE_PUBLIC:-}
+    depends_on:
+      pz-init:
+        condition: service_completed_successfully
+      pz-server:
+        condition: service_started
+    secrets: [api_token]
+    volumes:
+      - data:/pz/data
+      - state:/pz/state
+      - control:/pz/control
+      - backups:/pz/backups
+      - logs:/pz/logs
+    networks: [control]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, python, -m, pzops.cli, ping]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  pz-discord:
+    profiles: [discord]
+    image: ${COMPOSE_PROJECT_NAME:-pzdev}-discord:local
+    build:
+      context: .
+      dockerfile: discord/Dockerfile
+    restart: unless-stopped
+    environment:
+      PZ_DISCORD_GUILD_ID: ${PZ_DISCORD_GUILD_ID:-}
+      PZ_DISCORD_RESTART_ROLE: ${PZ_DISCORD_RESTART_ROLE:-Zomboid}
+    secrets: [api_token, discord_token]
+    depends_on:
+      pz-ops:
+        condition: service_started
+    networks: [control, discord_egress]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+  tools:
+    profiles: [tools]
+    image: ${COMPOSE_PROJECT_NAME:-pzdev}-ops:local
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    user: "0:0"
+    entrypoint: [python, -m, pzops.bootstrap, tool]
+    environment: *settings
+    network_mode: none
+    volumes:
+      - data:/pz/data
+      - state:/pz/state
+      - backups:/pz/backups
+      - type: bind
+        source: ${PZ_IMPORT_SOURCE:-./imports}
+        target: /source
+        read_only: true
+      - type: bind
+        source: ${PZ_EXPORT_DIR:-./exports}
+        target: /exports
+volumes:
+  app:
+    name: ${PZ_APP_VOLUME:-${COMPOSE_PROJECT_NAME:-pzdev}_app}
+  workshop:
+    name: ${PZ_WORKSHOP_VOLUME:-${COMPOSE_PROJECT_NAME:-pzdev}_workshop}
+  data: {}
+  state: {}
+  control: {}
+  backups: {}
+  logs: {}
+networks:
+  control:
+    internal: true
+  game: {}
+  discord_egress: {}
+secrets:
+  api_token:
+    file: ./secrets/api.token
+  discord_token:
+    file: ./secrets/discord.token
