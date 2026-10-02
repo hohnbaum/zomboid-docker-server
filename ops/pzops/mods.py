@@ -107,6 +107,8 @@ class Lifecycle:
         pending = read_json(self.layout.pending)
         if pending is None:
             return None
+        if not isinstance(pending, dict):
+            raise PZError("PENDING_INCOMPLETE")
         if pending.get("SchemaVersion") != 2:
             raise PZError("LEGACY_PENDING_IMPORT_REQUIRED")
         if not pending.get("RecordId") or not pending.get("CreatedAt") or not pending.get("Reason"):

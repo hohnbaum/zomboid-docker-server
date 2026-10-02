@@ -130,8 +130,15 @@ def tree_files(root):
 
 
 def manifest(root):
-    return {key: {"bytes": p.stat().st_size, "sha256": file_hash(p)}
-            for key, p in tree_files(root)}
+    result = {}
+    for key, path in tree_files(root):
+        checksum, size = hashlib.sha256(), 0
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                checksum.update(chunk)
+                size += len(chunk)
+        result[key] = {"bytes": size, "sha256": checksum.hexdigest()}
+    return result
 
 
 @dataclass

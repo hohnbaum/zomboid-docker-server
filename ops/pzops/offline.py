@@ -80,6 +80,9 @@ def main(argv=None):
     except PZError as exc:
         print(json.dumps({"error": exc.code}))
         sys.exit(1)
+    except Exception:
+        print(json.dumps({"error": "TOOL_FAILED"}))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

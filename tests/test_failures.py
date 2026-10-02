@@ -17,6 +17,14 @@ from pzops.util import FileLock, PZError, atomic_bytes, digest, file_hash, manif
 
 
 class FailureTests(Fixture):
+    def test_corrupt_intent_cannot_resurrect_game(self):
+        write_json(self.layout.state / 'intent.json', {'desired': 'false'})
+        self.error('INVALID_STATE', self.ops.intent)
+
+    def test_malformed_pending_fixed_error(self):
+        write_json(self.layout.pending, [])
+        self.error('PENDING_INCOMPLETE', self.life.validate)
+
     def test_backup_failure_does_not_publish(self):
         with patch('pzops.backups.shutil.copyfile', side_effect=OSError('synthetic failure')):
             with self.assertRaises(OSError):
@@ -78,6 +86,12 @@ class FailureTests(Fixture):
         self.error('STEAM_INSTALL_FAILED', self.ops.execute, self.job('update'))
         self.assertFalse(self.ops.intent())
         self.assertFalse(self.proc['running'])
+
+    def test_refused_restart_preserves_false_intent(self):
+        self.ops.workshop = lambda: {'State': 'none'}
+        self.ops.rcon_call = lambda *a: 'Players connected (1):\n-player'
+        self.error('PLAYERS_CONNECTED', self.ops.execute, self.job('restart'))
+        self.assertFalse(self.ops.intent())
 
     def test_remote_build_failure_is_unknown(self):
         original = self.ops.agent
@@ -192,19 +206,24 @@ class AgentTests(Fixture):
         atomic_bytes(self.layout.logs / 'game-console.log', b'version=42.21.0')
         self.assertIsNone(self.agent.installed()['version'])
 
+    def test_interrupted_install_blocks_start_and_version(self):
+        write_json(self.module.APP / '.pz-installing.json', {'job': 'synthetic'})
+        self.assertIsNone(self.agent.installed()['version'])
+        self.error('APP_INSTALL_INCOMPLETE', self.agent.start, 'synthetic-job')
+
     def test_current_generation_proves_build_version(self):
         write_json(self.module.APP / '.pz-install.json', {})
         atomic_bytes(self.layout.logs / 'game-console.log', b'stale version=42.99.0\n')
         self.agent.log_offset = (self.layout.logs / 'game-console.log').stat().st_size
         with (self.layout.logs / 'game-console.log').open('ab') as stream:
-            stream.write(b'version=42.21.0\n')
+            stream.write(b'version=42.21.0\nmod version=99.0.0\n')
         self.assertEqual(self.agent.installed()['version'], '42.21.0')
         self.assertEqual(read_json(self.module.APP / '.pz-install.json')['version_build'], '1000')
 
     def test_start_is_idempotent_and_heap_uses_package(self):
         class Child:
             def __init__(self):
-                self.stdin, self.pid, self.exit = io.BytesIO(), 99999, None
+                self.stdin, self.stdout, self.pid, self.exit = io.BytesIO(), io.BytesIO(), 99999, None
             def poll(self):
                 return self.exit
         with patch.object(self.module.subprocess, 'Popen', return_value=Child()) as spawn, patch.dict(os.environ, {'PZ_HEAP': '2g'}):

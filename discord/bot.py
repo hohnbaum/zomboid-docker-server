@@ -63,6 +63,10 @@ def install_commands(bot):
         embed = discord.Embed(title="Project Zomboid", description=f"Status: **{value['state']}**\nSpieler: **{count}**")
         embed.add_field(name="Betrieb", value=f"Gewünscht: {value['desired']}\nWartung: {value['maintenance']}\nMod-Neustart ausstehend: {value['pending']}")
         embed.add_field(name="Version", value=f"{value['version'] or 'unbekannt'} / Build {value['build'] or 'unbekannt'}")
+        if value.get("uptime_seconds") is not None:
+            embed.add_field(name="Laufzeit", value=f"{int(value['uptime_seconds'] // 60)} Minuten")
+        if value.get("player_names"):
+            embed.add_field(name="Spieler", value=", ".join(discord.utils.escape_markdown(x) for x in value["player_names"])[:1000])
         await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @bot.tree.command(name="pzinfo", description="Freigegebene Servereinstellungen anzeigen")

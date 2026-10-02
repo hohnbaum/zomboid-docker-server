@@ -55,7 +55,10 @@ class Operations:
             path.mkdir(parents=True, exist_ok=True)
 
     def intent(self):
-        return bool(read_json(self.layout.state / "intent.json", {}).get("desired", False))
+        state = read_json(self.layout.state / "intent.json", {})
+        if not isinstance(state, dict) or not isinstance(state.get("desired", False), bool):
+            raise PZError("INVALID_STATE")
+        return state.get("desired", False)
 
     def set_intent(self, desired):
         write_json(self.layout.state / "intent.json", {"desired": bool(desired), "updated_at": now()})
@@ -88,11 +91,13 @@ class Operations:
         except (PZError, ValueError):
             reasons.append("CONFIG_UNAVAILABLE")
         players = None
+        names = []
         known = False
         rcon_ok = False
         if proc.get("running"):
             try:
-                players = self.players()["count"]
+                connected = self.players()
+                players, names = connected["count"], connected["names"]
                 known = rcon_ok = True
             except PZError as exc:
                 reasons.append(exc.code)
@@ -119,6 +124,7 @@ class Operations:
         age = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(latest["CompletedAt"])).total_seconds() / 3600) if latest else None
         result = {"state": state, "running": bool(proc.get("running")), "launching": bool(proc.get("launching")),
                   "ready": ready, "desired": desired, "maintenance": maintenance, "players": players, "players_known": known,
+                  "player_names": names,
                   "rcon": rcon_ok, "udp": udp, "pending": self.layout.pending.exists(), "pending_valid": pending_valid, "recovery_required": recovery,
                   "generation": proc.get("generation"), "agent": proc.get("agent"), "version": proc.get("version"), "build": proc.get("build"),
                   "uptime_seconds": proc.get("uptime_seconds"), "rss_bytes": proc.get("rss_bytes"),
@@ -229,6 +235,9 @@ class Operations:
         launched = self.agent("start", job=job["id"])
         self.wait_ready(launched["generation"])
         self.phase(job, "ready")
+        runtime = read_json(self.layout.data / ".runtime-ready.json")
+        if runtime and not runtime.get("bootstrap_completed"):
+            write_json(self.layout.data / ".runtime-ready.json", {**runtime, "bootstrap_completed": True})
         self.mods.acknowledge(launched["generation"], pending["RecordId"] if pending else None, True)
         return {"ready": True, "generation": launched["generation"]}
 
@@ -292,6 +301,7 @@ class Operations:
         self.mods.validate()
         proc = self.agent("status")
         was_running = proc.get("launching", False)
+        was_desired = self.intent()
         if action == "install":
             if was_running:
                 raise PZError("GAME_LIVE")
@@ -329,7 +339,6 @@ class Operations:
                     workshop_before = {"State": "unavailable"}
                 change = config_check(self.layout)["state"]
                 backup_type = "pre-workshop-update" if self.layout.pending.exists() or change == "workshop" or workshop_before["State"] != "none" else "pre-config-restart" if change != "none" else None
-                self.set_intent(True)
             if action == "workshop-update":
                 workshop_before = self.workshop()
                 backup_type = "pre-workshop-update"
@@ -337,6 +346,8 @@ class Operations:
                 backup_type = "pre-server-update"
             self.phase(job, "saving-and-stopping")
             self.stop_game(force)
+            if action == "restart":
+                self.set_intent(True)
             try:
                 if backup_type:
                     self.phase(job, "backup")
@@ -352,7 +363,7 @@ class Operations:
                 self.phase(job, "installing")
                 self.agent("install", timeout=7500, job=job["id"] + "-install")
             result = {"backup": snapshot["name"] if snapshot else None}
-            if was_running or action == "restart":
+            if was_running or action == "restart" or (action == "update" and was_desired):
                 result.update(self.start_game(job, safety_done=bool(snapshot)))
             if action == "workshop-update":
                 after = self.workshop()

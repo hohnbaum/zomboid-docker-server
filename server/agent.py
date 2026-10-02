@@ -14,6 +14,7 @@ from pathlib import Path
 from pzops.ini import Ini
 from pzops.util import FileLock, PZError, file_hash, identifier, now, read_json, write_json
 from pzops import rcon
+from pzops.redact import pump
 
 APP = Path("/pz/app")
 DATA = Path("/pz/data")
@@ -56,22 +57,26 @@ class Agent:
         m = re.search(r'"buildid"\s+"(\d+)"', text)
         evidence = read_json(APP / ".pz-install.json", {})
         build = m[1] if m else None
+        incomplete = (APP / ".pz-installing.json").exists()
         version = evidence.get("version") if evidence.get("version_build") == build else None
         # Only this agent's current launch establishes version evidence. Copied logs
         # and previous build logs cannot satisfy the imported-world gate.
         path = LOGS / "game-console.log"
-        if self.log_offset is not None and path.exists():
+        if not incomplete and self.log_offset is not None and path.exists():
             with path.open("rb") as stream:
                 stream.seek(self.log_offset)
                 content = stream.read(8 * 1024 * 1024).decode(errors="replace")
-            found = re.findall(r'(?:version=|version\s*[:=]?\s*)(\d+\.\d+\.\d+)', content, re.I)
-            if found and (version != found[-1] or evidence.get("version_build") != build):
-                version = found[-1]
+            found = re.findall(r'\bversion=(\d+\.\d+\.\d+)\b', content)
+            # PZ emits this during its own initialization, before loading mods.
+            # Later mod/library release messages must not replace that identity.
+            if found and (version != found[0] or evidence.get("version_build") != build):
+                version = found[0]
                 evidence.update(version=version, version_build=build, verified_at=now(), generation=self.generation,
                                 version_evidence="current Linux launcher startup")
                 write_json(APP / ".pz-install.json", evidence)
         return {"installed": (APP / "start-server.sh").is_file(), "build": build,
-                "version": version, "agent": self.identity, "evidence": evidence}
+                "version": None if incomplete else version, "installation_incomplete": incomplete,
+                "agent": self.identity, "evidence": evidence}
 
     def udp(self, pid):
         inodes = set()
@@ -135,6 +140,7 @@ class Agent:
             return self.actions[job]
         previous = self.installed()
         self.log_offset = None
+        write_json(APP / ".pz-installing.json", {"job": job, "started_at": now()})
         log = LOGS / ("steam-install-" + job + ".log")
         args = ["/opt/steamcmd/steamcmd.sh", "+force_install_dir", str(APP), "+login", "anonymous",
                 "+app_info_update", "1", "+app_update", "380870", "+quit"]
@@ -159,6 +165,7 @@ class Agent:
             evidence.update(version=previous["version"], version_build=previous["build"],
                             version_evidence=previous["evidence"].get("version_evidence"))
         write_json(APP / ".pz-install.json", evidence)
+        (APP / ".pz-installing.json").unlink()
         self.actions[job] = self.installed()
         return self.actions[job]
 
@@ -168,14 +175,17 @@ class Agent:
             return current
         if job in self.actions:
             raise PZError("JOB_ALREADY_STARTED")
+        if current["installation_incomplete"]:
+            raise PZError("APP_INSTALL_INCOMPLETE")
         if not current["installed"]:
             raise PZError("APP_NOT_INSTALLED")
         imported = read_json(DATA / ".import-complete.json") or read_json(DATA / ".migration-gate.json")
         if imported:
             required = imported.get("required_version")
-            if not required or current["version"] != required:
+            if required != "42.21.0" or current["version"] != required:
                 raise PZError("BLOCKED_VERSION")
-            if not (DATA / ".pristine-verified.json").exists():
+            pristine = read_json(DATA / ".pristine-verified.json")
+            if not isinstance(pristine, dict) or not isinstance(pristine.get("backup"), str) or not re.fullmatch(r"[a-f0-9]{64}", pristine.get("manifest_hash", "")):
                 raise PZError("PRISTINE_BACKUP_REQUIRED")
         ini = Ini.read(DATA / "Server" / (self.servername + ".ini"))
         if int(ini.get("DefaultPort")) != 16261 or int(ini.get("UDPPort")) != 16262:
@@ -203,7 +213,7 @@ class Agent:
         # A first synthetic admin password is delivered via stdin, never a process argument.
         try:
             self.child = subprocess.Popen(args, cwd=APP, stdin=subprocess.PIPE,
-                                          stdout=self.child_log, stderr=subprocess.STDOUT, start_new_session=True)
+                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         except Exception:
             self.app_lock.__exit__()
             self.app_lock = None
@@ -211,7 +221,11 @@ class Agent:
             self.data_lock = None
             raise
         admin = DATA / ".bootstrap-admin.secret"
+        secrets = [ini.get(key, "").encode() for key in ("Password", "RCONPassword")]
         if admin.exists():
+            secrets.append(admin.read_text().strip().encode())
+        threading.Thread(target=pump, args=(self.child.stdout, self.child_log, secrets), daemon=True).start()
+        if admin.exists() and not read_json(DATA / ".runtime-ready.json", {}).get("bootstrap_completed"):
             self.child.stdin.write((admin.read_text().strip() + "\n") .encode() * 2)
             self.child.stdin.flush()
         write_json(CONTROL / "child.json", {"generation": self.generation, "agent": self.identity,
@@ -299,7 +313,7 @@ class Agent:
             time.sleep(1)
             rcon.command("127.0.0.1", port, password, "quit")
             self.child.wait(timeout=60)
-        except (PZError, subprocess.TimeoutExpired):
+        except (PZError, subprocess.TimeoutExpired, OSError, ValueError):
             # Docker's outer grace timeout can eventually terminate the container;
             # do not hide this as a verified clean shutdown or kill the child here.
             while self.child.poll() is None:

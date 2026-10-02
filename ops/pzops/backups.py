@@ -96,6 +96,8 @@ def create(layout, kind="manual", version=None, protected=False, _locked=False):
             dst.parent.mkdir(parents=True, exist_ok=True)
             before[key] = {"bytes": source.stat().st_size, "sha256": file_hash(source)}
             shutil.copyfile(source, dst)
+            with dst.open("r+b") as durable:
+                os.fsync(durable.fileno())
         for dirname in ("Saves", "db", "Lua"):
             (staging / "data" / dirname).mkdir(parents=True, exist_ok=True)
         actual = manifest(staging)
@@ -104,6 +106,9 @@ def create(layout, kind="manual", version=None, protected=False, _locked=False):
         if {k: {"bytes": p.stat().st_size, "sha256": file_hash(p)} for k, p in persistent_files(layout)} != before:
             raise PZError("BACKUP_SOURCE_CHANGED")
         databases = database_check(staging / "data")
+        if os.name != "nt":
+            for directory, _, _ in os.walk(staging, topdown=False):
+                sync_dir(directory)
         write_json(staging / "manifest.json", before)
         metadata = {"SchemaVersion": 3, "Status": "complete", "Type": kind, "ServerName": layout.server,
                     "CompletedAt": now(), "FileCount": len(before), "SizeBytes": sum(x["bytes"] for x in before.values()),
