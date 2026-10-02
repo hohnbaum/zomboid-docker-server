@@ -103,18 +103,30 @@ def tree_files(root):
     if unsafe_link(root):
         raise PZError("UNSAFE_LINK")
     seen = set()
-    for base, dirs, files in os.walk(root, followlinks=False):
-        for name in sorted(dirs + files):
-            p = Path(base) / name
-            if unsafe_link(p):
+    stack = [root]
+    while stack:
+        base = stack.pop()
+        with os.scandir(base) as stream:
+            entries = sorted(stream, key=lambda x: x.name)
+        for item in entries:
+            p = Path(item.path)
+            is_dir = item.is_dir(follow_symlinks=False)
+            # DirEntry caches Windows directory metadata. Repeating Path lstat,
+            # symlink and junction queries per small world file is very expensive.
+            attrs = getattr(item.stat(follow_symlinks=False), "st_file_attributes", 0)
+            if item.is_symlink() or (is_dir and attrs & 0x400):
                 raise PZError("UNSAFE_LINK")
             key = p.relative_to(root).as_posix()
             relative(key)
             if key.casefold() in seen:
                 raise PZError("CASE_COLLISION")
             seen.add(key.casefold())
-            if p.is_file():
+            if is_dir:
+                stack.append(p)
+            elif item.is_file(follow_symlinks=False):
                 yield key, p
+            else:
+                raise PZError("UNSAFE_FILE_TYPE")
 
 
 def manifest(root):

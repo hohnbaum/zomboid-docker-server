@@ -111,10 +111,15 @@ class Lifecycle:
             raise PZError("LEGACY_PENDING_IMPORT_REQUIRED")
         if not pending.get("RecordId") or not pending.get("CreatedAt") or not pending.get("Reason"):
             raise PZError("PENDING_INCOMPLETE")
+        import re
+        if not isinstance(pending["RecordId"], str) or not re.fullmatch(r"[a-f0-9]{32}", pending["RecordId"]):
+            raise PZError("PENDING_INCOMPLETE")
+        if pending.get("Plan") != "plans/" + pending["RecordId"] + "/plan.json":
+            raise PZError("PENDING_PLAN_PATH_INVALID")
         plan = confined(self.layout.state, pending.get("Plan"))
         if not plan.is_file() or file_hash(plan) != pending.get("PlanHash"):
             raise PZError("PENDING_PLAN_TAMPERED")
-        validate_plan(read_json(plan))
+        authority = validate_plan(read_json(plan))
         expected = pending.get("Expected")
         if not isinstance(expected, dict) or set(expected) != set(PROPS):
             raise PZError("PENDING_EXPECTED_MISSING")
@@ -122,7 +127,18 @@ class Lifecycle:
             if not isinstance(expected[prop], list):
                 raise PZError("PENDING_EXPECTED_INVALID")
             for val in expected[prop]:
-                entry(val)
+                if not isinstance(val, str) or entry(val)["Id"] != val:
+                    raise PZError("PENDING_EXPECTED_INVALID")
+            if len(expected[prop]) != len(set(expected[prop])):
+                raise PZError("PENDING_EXPECTED_INVALID")
+        history = pending.get("History")
+        if history != "plans/" + pending["RecordId"] + "/before.ini":
+            raise PZError("PENDING_HISTORY_INVALID")
+        before_file = confined(self.layout.state, history)
+        if not before_file.is_file() or file_hash(before_file) != pending.get("BeforeIniHash"):
+            raise PZError("PENDING_HISTORY_TAMPERED")
+        if planned(Ini.read(before_file).mod_state(), authority) != expected:
+            raise PZError("PENDING_REPLAY_MISMATCH")
         if expected != Ini.read(self.layout.ini).mod_state():
             raise PZError("PENDING_MOD_STATE_MISMATCH")
         return pending
@@ -151,6 +167,7 @@ class Lifecycle:
         pending = {"SchemaVersion": 2, "RecordId": ident, "CreatedAt": now(),
                    "Plan": "plans/" + ident + "/plan.json", "PlanHash": file_hash(root / "plan.json"),
                    "History": "plans/" + ident + "/before.ini", "Reason": "Explicit plan awaits healthy fresh start",
+                   "BeforeIniHash": digest(original),
                    "Expected": diff["Expected"], "Before": counts(diff["Before"]), "After": counts(diff["Expected"]),
                    "IniHash": digest(newbytes), "ConfigHash": config_fingerprint(self.layout)["ConfigHash"]}
         write_json(root / "pending.json", pending)

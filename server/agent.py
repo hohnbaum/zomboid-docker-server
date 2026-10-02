@@ -31,6 +31,8 @@ class Agent:
         self.mutex = threading.RLock()
         self.actions = {}
         self.log_offset = None
+        self.app_lock = None
+        self.data_lock = None
 
     def process(self):
         if self.child is None or self.child.poll() is not None:
@@ -93,6 +95,12 @@ class Agent:
         return sorted(ports)
 
     def status(self):
+        if self.app_lock and (self.child is None or self.child.poll() is not None):
+            self.app_lock.__exit__()
+            self.app_lock = None
+            if self.data_lock:
+                self.data_lock.__exit__()
+                self.data_lock = None
         pid = self.process()
         try:
             cgroup_memory = int(Path("/sys/fs/cgroup/memory.current").read_text())
@@ -115,6 +123,12 @@ class Agent:
                 **self.installed()}
 
     def install(self, job):
+        # An explicitly shared app volume cannot be updated while another project
+        # owns its native runtime. This lock is also held for the Java child's life.
+        with FileLock(APP / ".app-runtime.guard"):
+            return self._install(job)
+
+    def _install(self, job):
         if self.child and self.child.poll() is None:
             raise PZError("GAME_LIVE")
         if job in self.actions:
@@ -172,14 +186,30 @@ class Agent:
         self.generation = uuid.uuid4().hex
         package = read_json(APP / "ProjectZomboid64.json")
         package["vmArgs"] = [v for v in package["vmArgs"] if not v.startswith(("-Xms", "-Xmx"))] + ["-Xms" + heap, "-Xmx" + heap]
+        self.app_lock = FileLock(APP / ".app-runtime.guard")
+        self.app_lock.__enter__()
+        try:
+            self.data_lock = FileLock(DATA / ".game-runtime.guard")
+            self.data_lock.__enter__()
+        except Exception:
+            self.app_lock.__exit__()
+            self.app_lock = None
+            raise
         write_json(APP / "ProjectZomboid64.json", package)
         self.child_log = (LOGS / "game-console.log").open("ab", buffering=0)
         self.log_offset = self.child_log.tell()
         args = ["/bin/bash", str(APP / "start-server.sh"), "-servername", self.servername,
                 "-cachedir=" + str(DATA)]
         # A first synthetic admin password is delivered via stdin, never a process argument.
-        self.child = subprocess.Popen(args, cwd=APP, stdin=subprocess.PIPE,
-                                      stdout=self.child_log, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            self.child = subprocess.Popen(args, cwd=APP, stdin=subprocess.PIPE,
+                                          stdout=self.child_log, stderr=subprocess.STDOUT, start_new_session=True)
+        except Exception:
+            self.app_lock.__exit__()
+            self.app_lock = None
+            self.data_lock.__exit__()
+            self.data_lock = None
+            raise
         admin = DATA / ".bootstrap-admin.secret"
         if admin.exists():
             self.child.stdin.write((admin.read_text().strip() + "\n") .encode() * 2)

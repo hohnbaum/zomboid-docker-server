@@ -8,7 +8,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from pzops.util import PZError, atomic_bytes, confined, file_hash, manifest, now, read_json, relative, sync_dir, tree_files, write_json
+from pzops.util import FileLock, PZError, atomic_bytes, confined, file_hash, identifier, manifest, now, read_json, relative, sync_dir, tree_files, write_json
 from pzops.ini import Ini
 from pzops.mods import Lifecycle
 
@@ -60,12 +60,14 @@ def verify(snapshot, server=None):
         allowed = len(parts) > 1 and ((parts[0] == "data" and (parts[1] in DATA_ROOTS or "/".join(parts[1:]) in DATA_MARKERS)) or (parts[0] == "state" and (parts[1] in STATE_ROOTS or parts[1:] == ("pending-mod-restart.json",))))
         if not allowed or not isinstance(info, dict):
             raise PZError("BACKUP_PATH_INVALID")
+        if not isinstance(info.get("bytes"), int) or info["bytes"] < 0 or not isinstance(info.get("sha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", info["sha256"]):
+            raise PZError("BACKUP_MANIFEST_INVALID")
         if not path.is_file() or path.stat().st_size != info.get("bytes") or file_hash(path) != info.get("sha256"):
             raise PZError("BACKUP_HASH_MISMATCH")
     actual = {key for key, p in tree_files(snapshot) if key not in ("_backup.json", "manifest.json")}
     if actual != set(expected) or len(expected) != metadata.get("FileCount") or sum(x["bytes"] for x in expected.values()) != metadata.get("SizeBytes"):
         raise PZError("BACKUP_INVENTORY_MISMATCH")
-    name = server or metadata.get("ServerName")
+    name = identifier(server or metadata.get("ServerName"))
     if name != metadata.get("ServerName"):
         raise PZError("BACKUP_SERVER_MISMATCH")
     Ini.read(snapshot / "data/Server" / (name + ".ini")).mod_state()
@@ -74,7 +76,10 @@ def verify(snapshot, server=None):
     return metadata
 
 
-def create(layout, kind="manual", version=None, protected=False):
+def create(layout, kind="manual", version=None, protected=False, _locked=False):
+    if not _locked:
+        with FileLock(layout.data / ".game-runtime.guard"):
+            return create(layout, kind, version, protected, _locked=True)
     if kind not in TYPES:
         raise PZError("BACKUP_TYPE_INVALID")
     if (layout.state / "apply-journal.json").exists() or (layout.state / "ack-journal.json").exists():
@@ -126,8 +131,13 @@ def catalog(layout):
             meta = read_json(p / "_backup.json")
             if not isinstance(meta, dict) or meta.get("SchemaVersion") != 3 or meta.get("Status") != "complete" or meta.get("Protected") or meta.get("ServerName") != layout.server:
                 continue
-            datetime.fromisoformat(meta["CompletedAt"])
+            stamp = datetime.fromisoformat(meta["CompletedAt"])
+            if stamp.utcoffset() is None:
+                continue
             if not (p / "manifest.json").is_file() or file_hash(p / "manifest.json") != meta.get("ManifestHash"):
+                continue
+            entries = read_json(p / "manifest.json")
+            if not isinstance(entries, dict) or len(entries) != meta.get("FileCount") or sum(x["bytes"] for x in entries.values()) != meta.get("SizeBytes"):
                 continue
             if any(not (p / "data" / x).is_dir() for x in ("Server", "Saves", "db")):
                 continue
@@ -172,15 +182,18 @@ def retention(layout, recent=4, weekly=4):
     return removed
 
 
-def restore(layout, snapshot, confirm_replace=False, desired=False, running=False):
+def restore(layout, snapshot, confirm_replace=False, desired=False, running=False, _locked=False):
+    if not _locked:
+        with FileLock(layout.data / ".game-runtime.guard"):
+            return restore(layout, snapshot, confirm_replace, desired, running, _locked=True)
     meta = verify(snapshot, layout.server)
     if desired or running:
         raise PZError("RESTORE_REQUIRES_OFFLINE")
-    existing = any(layout.data.iterdir()) if layout.data.exists() else False
+    existing = any(p.name != ".game-runtime.guard" for p in layout.data.iterdir()) if layout.data.exists() else False
     if existing and not confirm_replace:
         raise PZError("RESTORE_CONFIRM_REQUIRED")
     if existing:
-        create(layout, "manual", protected=True)
+        create(layout, "manual", protected=True, _locked=True)
     stage = Path(tempfile.mkdtemp(prefix=".restore-", dir=layout.backups))
     try:
         shutil.copytree(Path(snapshot) / "data", stage / "data")
@@ -195,6 +208,8 @@ def restore(layout, snapshot, confirm_replace=False, desired=False, running=Fals
         # Keep a recoverable publication journal; interrupted replacement never auto-starts.
         write_json(layout.state / "restore-journal.json", {"backup": meta["ManifestHash"], "stage": stage.name, "phase": "prepared"})
         for p in list(layout.data.iterdir()):
+            if p.name == ".game-runtime.guard":
+                continue  # Permanent kernel lock inode must never be replaced.
             if p.is_dir():
                 shutil.rmtree(p)
             else:

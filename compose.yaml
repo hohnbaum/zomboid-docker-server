@@ -3,7 +3,6 @@ x-settings: &settings
   PZ_SERVER_NAME: ${PZ_SERVER_NAME:-pztest}
   PZ_HEAP: ${PZ_HEAP:-6g}
   PZ_READY_TIMEOUT: ${PZ_READY_TIMEOUT:-1200}
-  PZ_REQUIRED_IMPORT_VERSION: ${PZ_REQUIRED_IMPORT_VERSION:-42.21.0}
 services:
   pz-init:
     image: ${COMPOSE_PROJECT_NAME:-pzdev}-ops:local

@@ -2,10 +2,11 @@ import os
 import secrets
 import shutil
 import tempfile
+import tarfile
 import uuid
 from pathlib import Path
 from pzops.ini import Ini
-from pzops.util import PZError, atomic_bytes, file_hash, manifest, now, read_json, tree_files, write_json
+from pzops.util import PZError, atomic_bytes, confined, file_hash, manifest, now, read_json, tree_files, write_json
 from pzops import backups
 
 
@@ -17,8 +18,36 @@ def disposition(key, server):
     return "reference"
 
 
+def import_archive(layout, archive):
+    stage = Path(tempfile.mkdtemp(prefix=".source-transfer-", dir=layout.backups))
+    seen, total = set(), 0
+    try:
+        with tarfile.open(archive, "r:*") as stream:
+            for member in stream:
+                path = confined(stage, member.name)
+                if not (member.isfile() or member.isdir()) or member.name.casefold() in seen or not (member.name == "source-manifest.json" or member.name.startswith("instance/")):
+                    raise PZError("UNSAFE_ARCHIVE_MEMBER")
+                seen.add(member.name.casefold())
+                total += member.size
+                if member.size < 0 or total > 100 * 1024**3 or len(seen) > 2000000:
+                    raise PZError("ARCHIVE_LIMIT_EXCEEDED")
+                if member.isdir():
+                    if not member.name.startswith("instance/"):
+                        raise PZError("UNSAFE_ARCHIVE_MEMBER")
+                    path.mkdir(parents=True, exist_ok=True)
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with stream.extractfile(member) as inp, path.open("xb") as out:
+                    shutil.copyfileobj(inp, out)
+        if manifest(stage / "instance") != read_json(stage / "source-manifest.json"):
+            raise PZError("SOURCE_TRANSFER_HASH_MISMATCH")
+        return import_instance(layout, stage / "instance")
+    finally:
+        shutil.rmtree(stage)
+
+
 def init_empty(layout):
-    if any(layout.data.iterdir()):
+    if any(p.name != ".game-runtime.guard" for p in layout.data.iterdir()):
         raise PZError("TARGET_NOT_EMPTY")
     for folder in ("Server", "Saves", "db", "Lua"):
         (layout.data / folder).mkdir()
@@ -39,7 +68,7 @@ def import_instance(layout, source):
     target = layout.data.resolve()
     if target == source or target.is_relative_to(source) or source.is_relative_to(target) or "source-snapshot" in target.parts:
         raise PZError("SOURCE_TARGET_OVERLAP")
-    if any(layout.data.iterdir()):
+    if any(p.name != ".game-runtime.guard" for p in layout.data.iterdir()):
         raise PZError("TARGET_NOT_EMPTY")
     if (layout.state / "intent.json").exists() and read_json(layout.state / "intent.json").get("desired"):
         raise PZError("IMPORT_REQUIRES_OFFLINE")
@@ -83,7 +112,7 @@ def import_instance(layout, source):
                   "active_files": sum(x["disposition"] == "active" for x in classified.values()), "databases_checked": databases}
         write_json(layout.state / "intent.json", {"desired": False, "updated_at": now()})
         write_json(layout.data / ".migration-gate.json", {"required_version": "42.21.0", "server": layout.server})
-        pristine = backups.create(layout, protected=True, version={"version": "42.21.0", "source_evidence": True})
+        pristine = backups.create(layout, protected=True, version={"version": "42.21.0", "source_evidence": True}, _locked=True)
         write_json(layout.data / ".pristine-verified.json", {"backup": pristine["name"], "manifest_hash": pristine["ManifestHash"]})
         write_json(layout.data / ".import-complete.json", marker)
         return {**marker, "desired": False, "pristine_backup": pristine["name"]}

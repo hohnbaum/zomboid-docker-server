@@ -85,7 +85,10 @@ class Jobs:
 
 
 def authorized(header, token):
-    return isinstance(header, str) and hmac.compare_digest(header, "Bearer " + token)
+    try:
+        return isinstance(header, str) and hmac.compare_digest(header, "Bearer " + token)
+    except TypeError:
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):

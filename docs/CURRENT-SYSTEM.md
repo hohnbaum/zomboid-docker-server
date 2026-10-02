@@ -1,5 +1,8 @@
 # Current Windows system: verified discovery
 
+This is the historical snapshot audit. Current Linux implementation and acceptance
+are documented in ARCHITECTURE.md and TEST-REPORT.md.
+
 Discovery date: 2026-10-02 (Europe/Berlin). Scope: the local, read-only `source-snapshot`, not the live production host. This document describes observed code and copied evidence; a logged READY state is not a current production health check. No source operations scripts were executed.
 
 ## Evidence and inventory

@@ -41,6 +41,7 @@ def tool(action, args, source=None, export=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--env-file", help="Explicit private deployment .env file")
     parser.add_argument("action", choices=["init-secrets", "init-empty", "import", "restore", "export", "legacy-import", "logs", "job",
         "status", "health", "players", "save", "start", "stop", "restart", "install", "update", "workshop-status", "workshop-update",
         "backup", "config-state", "config-commit", "apply-mod-plan", "maintenance", "jobs", "version", "recover", "info", "endpoints"])
@@ -60,6 +61,8 @@ def main():
     parser.add_argument("--before")
     parser.add_argument("--activate", action="store_true")
     args = parser.parse_args()
+    if args.env_file:
+        os.environ["COMPOSE_ENV_FILES"] = str(Path(args.env_file).resolve(strict=True))
     try:
         if args.action == "init-secrets":
             path = ROOT / "secrets"
@@ -78,7 +81,17 @@ def main():
         elif args.action == "import":
             if not args.source:
                 parser.error("import requires --source pointing to a stopped instance directory")
-            tool("import", [], source=args.source)
+            offline()
+            import uuid
+            output = ROOT / "tmp" / ("source-" + uuid.uuid4().hex + ".tar")
+            transfer = [sys.executable, str(ROOT / "scripts/source-transfer.py"), "--source", args.source, "--output", str(output)]
+            if subprocess.run(transfer).returncode:
+                raise RuntimeError("SOURCE_TRANSFER_FAILED")
+            tool("import-archive", ["--archive", output.name], source=output.parent)
+            if subprocess.run(transfer + ["--verify"]).returncode:
+                raise RuntimeError("SOURCE_CHANGED_DURING_IMPORT")
+            # Keep the private transfer and SHA inventory for operator provenance;
+            # cleanup is explicit, outside the public tree.
         elif args.action == "restore" and args.archive:
             archive = Path(args.archive).resolve(strict=True)
             tool("restore", ["--archive", archive.name] + (["--confirm-replace"] if args.confirm_replace else []), source=archive.parent)

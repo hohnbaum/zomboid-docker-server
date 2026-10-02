@@ -31,13 +31,16 @@ def inspect_blob(name, data):
         reasons.append("access-token")
     if re.search(r"C:[\\/]Users[\\/][^\s<]+", text, re.I):
         reasons.append("private-user-path")
-    for m in re.finditer(r"^[ \t]*(?:RCONPassword|Password|DiscordToken|PZ_API_TOKEN|DISCORD_TOKEN)[ \t]*=[ \t]*(.*)$", text, re.M | re.I):
+    for m in re.finditer(r"^[ \t]*(?:RCONPassword|Password|DiscordToken|PZ_API_TOKEN|API_TOKEN|DISCORD_TOKEN)[ \t]*=[ \t]*(.*)$", text, re.M | re.I):
         value = m[1].strip().strip('"\'')
         if not PLACEHOLDER.fullmatch(value):
             reasons.append("credential-assignment")
     for m in re.finditer(r'''^[ \t]*["']?(?:RCONPassword|Password|DiscordToken|PZ_API_TOKEN|API_TOKEN|DISCORD_TOKEN|api_token|discord_token)["']?[ \t]*[=:][ \t]*["']([^"'\r\n]*)["']''', text, re.M | re.I):
         if not PLACEHOLDER.fullmatch(m[1]):
             reasons.append("credential-literal")
+    for m in re.finditer(r"^[ \t]*(?:RCONPassword|Password|DiscordToken|PZ_API_TOKEN|API_TOKEN|DISCORD_TOKEN)[ \t]*:[ \t]*([A-Za-z0-9_+/=.-]+)[ \t]*$", text, re.M | re.I):
+        if not PLACEHOLDER.fullmatch(m[1]):
+            reasons.append("credential-yaml-scalar")
     for m in re.finditer(r"^[ \t]*(?:PZ_ADVERTISE_\w+|GuildId|PZ_DISCORD_GUILD_ID)[ \t]*[=:][ \t]*(.+)$", text, re.M):
         if not PLACEHOLDER.fullmatch(m[1].strip().strip('"\'')):
             reasons.append("operator-address-or-id")

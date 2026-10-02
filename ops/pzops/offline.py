@@ -15,6 +15,8 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("empty")
     sub.add_parser("import")
+    p = sub.add_parser("import-archive")
+    p.add_argument("--archive", required=True)
     p = sub.add_parser("backup")
     p.add_argument("--type", default="manual")
     p = sub.add_parser("restore")
@@ -31,7 +33,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     layout = Layout.environment()
     try:
-        with FileLock(layout.state / "lifecycle.guard"):
+        with FileLock(layout.state / "lifecycle.guard"), FileLock(layout.data / ".game-runtime.guard"):
             desired = read_json(layout.state / "intent.json", {}).get("desired", False)
             if desired:
                 raise PZError("TOOLS_REQUIRE_DESIRED_FALSE")
@@ -39,14 +41,16 @@ def main(argv=None):
                 result = migration.init_empty(layout)
             elif args.action == "import":
                 result = migration.import_instance(layout, Path("/source"))
+            elif args.action == "import-archive":
+                result = migration.import_archive(layout, confined("/source", args.archive))
             elif args.action == "backup":
-                result = backups.create(layout, args.type)
+                result = backups.create(layout, args.type, _locked=True)
             elif args.action == "restore":
                 archive = confined("/source", args.archive)
                 stage = layout.backups / (".archive-" + uuid.uuid4().hex)
                 backups.extract_archive(archive, stage)
                 try:
-                    result = backups.restore(layout, stage, args.confirm_replace, desired=desired)
+                    result = backups.restore(layout, stage, args.confirm_replace, desired=desired, _locked=True)
                 finally:
                     import shutil
                     shutil.rmtree(stage)
@@ -69,6 +73,7 @@ def main(argv=None):
                     atomic_bytes(root / "before.ini", before)
                     write_json(layout.pending, {"SchemaVersion": 2, "RecordId": ident, "CreatedAt": now(),
                                "Plan": "plans/" + ident + "/plan.json", "PlanHash": file_hash(root / "plan.json"),
+                               "History": "plans/" + ident + "/before.ini", "BeforeIniHash": file_hash(root / "before.ini"),
                                "Expected": Ini.read(layout.ini).mod_state(), "Reason": "Explicit legacy import validated by saved-state replay"})
                     result["activated"] = True
         print(json.dumps(result))

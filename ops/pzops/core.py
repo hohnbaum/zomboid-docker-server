@@ -105,13 +105,21 @@ class Operations:
         recovery = self.recovery_required()
         if recovery:
             reasons.append("RECOVERY_REQUIRED")
+        pending_valid = None
+        if self.layout.pending.exists():
+            try:
+                self.mods.validate()
+                pending_valid = True
+            except PZError as exc:
+                pending_valid = False
+                reasons.append(exc.code)
         state = "MAINTENANCE" if maintenance else "READY" if ready else "STARTING_OR_DEGRADED" if proc.get("running") or proc.get("launching") else "DOWN_UNEXPECTED" if desired else "OFFLINE_EXPECTED"
         cat = backups.catalog(self.layout)
         latest = cat[0] if cat else None
         age = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(latest["CompletedAt"])).total_seconds() / 3600) if latest else None
         result = {"state": state, "running": bool(proc.get("running")), "launching": bool(proc.get("launching")),
                   "ready": ready, "desired": desired, "maintenance": maintenance, "players": players, "players_known": known,
-                  "rcon": rcon_ok, "udp": udp, "pending": self.layout.pending.exists(), "recovery_required": recovery,
+                  "rcon": rcon_ok, "udp": udp, "pending": self.layout.pending.exists(), "pending_valid": pending_valid, "recovery_required": recovery,
                   "generation": proc.get("generation"), "agent": proc.get("agent"), "version": proc.get("version"), "build": proc.get("build"),
                   "uptime_seconds": proc.get("uptime_seconds"), "rss_bytes": proc.get("rss_bytes"),
                   "backup": latest["name"] if latest else None, "backup_age_hours": age, "detail": reasons, "sample_time": now(),
