@@ -46,6 +46,21 @@ class FailureTests(Fixture):
             self.error('BUSY', backups.create, self.layout)
             self.error('BUSY', backups.restore, self.layout, self.layout.backups / item['name'], True)
 
+    def test_restore_copy_corruption_refused_before_publication(self):
+        item = backups.create(self.layout)
+        snap = self.layout.backups / item['name']
+        target = backups_test_target(self)
+        original = backups.shutil.copytree
+        def corrupt(source, destination, *args, **kwargs):
+            result = original(source, destination, *args, **kwargs)
+            if Path(source) == snap / 'data':
+                atomic_bytes(Path(destination) / 'options.ini', b'synthetic damaged copy')
+            return result
+        with patch('pzops.backups.shutil.copytree', side_effect=corrupt):
+            self.error('RESTORE_COPY_MISMATCH', backups.restore, target, snap)
+        self.assertFalse(target.ini.exists())
+        self.assertFalse((target.state / 'restore-journal.json').exists())
+
     def test_pending_expected_tamper_even_with_matching_ini(self):
         self.life.apply({'AddMods': ['Third']})
         record = read_json(self.layout.pending)

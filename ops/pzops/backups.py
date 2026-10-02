@@ -206,10 +206,18 @@ def restore(layout, snapshot, confirm_replace=False, desired=False, running=Fals
             shutil.copytree(Path(snapshot) / "state", stage / "state")
         else:
             (stage / "state").mkdir()
+        if manifest(stage) != read_json(Path(snapshot) / "manifest.json"):
+            raise PZError("RESTORE_COPY_MISMATCH")
         database_check(stage / "data")
         from pzops.util import Layout
         candidate = Layout(stage / "data", stage / "state", layout.backups, layout.logs, layout.server)
         Lifecycle(candidate).validate()
+        for _, copied in tree_files(stage):
+            with copied.open("r+b") as durable:
+                os.fsync(durable.fileno())
+        if os.name != "nt":
+            for directory, _, _ in os.walk(stage, topdown=False):
+                sync_dir(directory)
         # Keep a recoverable publication journal; interrupted replacement never auto-starts.
         write_json(layout.state / "restore-journal.json", {"backup": meta["ManifestHash"], "stage": stage.name, "phase": "prepared"})
         for p in list(layout.data.iterdir()):
