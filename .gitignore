@@ -1,6 +1,9 @@
 .env
 .env.*
 !.env.example
+!.env.test.example
+!.env.live.example
+!.env.versioncheck.example
 secrets/
 *.token
 *.secret

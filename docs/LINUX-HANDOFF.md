@@ -1,79 +1,147 @@
-# Moving to a Linux host
+# Debian-Handoff und finaler Cutover
 
-The public repository supplies code. A private handoff separately supplies a
-verified world archive, its SHA256, deployment `.env` and secret files. Never copy
-Docker Desktop internal volume directories, a Windows app installation, the
-Windows Workshop cache or a Python virtual environment.
+Die bestehende private Docker-Testkopie ist erfolgreich mit einem menschlichen
+Client abgenommen: Linux 42.21.0 / Build 25485538, READY, 111 Workshop-Items Current,
+137 Mods, bestehender Account/lebender Charakter und erwartete interaktive Welt.
+Details und Grenzen: [Testbericht](TEST-REPORT.md).
 
-## Prepare the source deployment
+**Diese Kopie und frühere Archive sind nicht die endgültige Produktionsquelle.**
+Der alte Windows-Server läuft weiter und hat neueren Spielstand. Git überträgt
+ausschließlich Code; die Welt kommt als neuer privater File-Drop.
 
-Choose the explicit source Compose project in `.env`. Confirm its name with
-`docker compose config --services` and `docker compose ps`. Keep clients offline
-during transfer. Run `./pz stop`, then `./pz backup`; these enforce known player
-state and stopped-copy integrity. Inspect the returned backup name.
+## 1. Zielhost vor dem letzten Spielabend vorbereiten
 
-Stop the project's control services with
-`docker compose stop pz-ops pz-server`. Export:
+Die vollständigen Bash-Befehle stehen im [deutschen README](../README.md):
 
-```sh
-./pz export --backup BACKUP_NAME --output exports/private-handoff.tar.gz
-```
+1. Debian 13 amd64 aktualisieren; Docker Engine/Compose aus dem offiziellen
+   Docker-Debian-Repository, Git und Python einrichten.
+2. Code klonen, .env.test/.env.live kopieren, getrennte Secrets erzeugen und
+   UID/GID 1000-Leserechte sowie Import-/Exportrechte vorbereiten.
+3. Leeren pztest installieren, READY/Health/Version prüfen, Client auf UDP 16261
+   testen; Serverpasswort ist leer. RCON/Admin/API bleiben private Secrets.
+4. Test kontrolliert stoppen **und seine Controlcontainer stoppen**, Volumes behalten.
+5. Das unabhängige Live-App-Volume einmal mit der leeren temporären Versionsprüfung
+   aus .env.versioncheck.example installieren/starten. Exakt 42.21.0 bestätigen,
+   dann Spiel und Controls stoppen. Nur dieser temporäre Prüflauf teilt das
+   Live-App-/Workshopvolume; seine leere Datenwelt ist eigenständig.
+6. Host-/Provider-Firewall für UDP 16261/16262 vorbereiten. Docker-DNAT und
+   DOCKER-USER berücksichtigen; nur UFW INPUT zu konfigurieren genügt nicht.
 
-The result reports archive size and SHA256. Store it and its checksum privately.
-`manifest.json` inside the archive contains per-file SHA256 and byte counts;
-`_backup.json` is completion metadata. The archive contains credentials and player
-data even though it has no Discord/API secret files. Protect it accordingly.
+Live und dauerhafter Test haben getrennte **App-, Workshop-, Daten-, State-,
+Control-, Backup- und Logvolumes sowie Secretdateien**. Kein neuer Host benötigt
+Docker Desktop, WSL, PowerShell oder private Dateien aus der bisherigen Testphase.
 
-## Prepare the destination
+## 2. Aktuellen Windows-Stand kontrolliert einfrieren
 
-Install Docker Engine, Compose and Python 3.12+ using your host's normal approved
-setup. Use an x86-64 Linux host. Clone the public repository, copy `.env.example`
-to `.env` and select a **new explicit project name** plus the archived server name.
-Choose a heap and verify actual memory/disk headroom. Run `./pz init-secrets` and
-`docker compose build pz-server pz-ops`.
+Alle Spieler abmelden, alten Server über seine vorhandene Verwaltung speichern
+und mit quit vollständig beenden. Vollständigen Prozess-Exit prüfen und dessen
+automatischen Wiederstart deaktivieren. Erst danach archivieren; kein Archiv
+einer weiterlaufenden Welt als konsistent erklären.
 
-To establish Linux version evidence before restoring an imported world, use a
-separate disposable empty project to install and start the public package, reach
-READY, stop it, then stop its services. An explicitly shared app volume may be
-selected with `PZ_APP_VOLUME`; only one project may run or update that app at once.
-The agent enforces this with a persistent kernel lock. Prefer separate app volumes
-for independently operated deployments.
+Es gibt **keinen zusätzlichen Windows-Exporthelfer**. Mit dem vorhandenen privaten
+Archivwerkzeug ein tar.gz des freigegebenen Persistence-Contracts erzeugen:
 
-Copy the private archive using your chosen private transfer method. Verify the
-external archive checksum against the source report. With the destination's
-control services stopped:
+| Archivwurzel | Inhalt |
+| --- | --- |
+| Server/ | Vier aktuelle szs-Konfigurationsdateien; andere Instanzdateien ggf. nur Referenz |
+| Saves/ | Vollständige Saves/Multiplayer/szs-Welt einschließlich Player-/Vehicle-DB, Journals und Mod-Persistenz |
+| db/ | szs.db und vorhandene zugehörige WAL-/SHM-/Journaldateien |
+| Lua/ | Persistente Lua-Moddaten; Diagnose-.log-Dateien ausschließen |
+| options.ini | Vorhandene Optionen |
 
-```sh
-./pz restore --archive /private/location/private-handoff.tar.gz
-docker compose up -d pz-server pz-ops
-./pz status
-./pz version
-./pz start
-```
+Diese Verzeichnisse liegen direkt an der Archivwurzel, ohne zusätzliches ./
+oder umschließendes Instanzverzeichnis. App, Steam, Workshop, Cache, Logs,
+historische native Backup-ZIPs und Verwaltungssecrets gehören nicht hinein.
+Aktive alte Mod-/Config-Pending-Vorgänge vorher kontrolliert abschließen; alte
+Windows-Ops-Records nicht ungeprüft als portable State-Provenienz übernehmen.
 
-Restore verifies extraction paths, hashes, counts, databases and pending mod
-provenance. It starts with `desired=false`. An empty data target is preferred;
-replacement requires `--confirm-replace` and a protected pre-restore backup.
-The archive's server name must match the configured name.
+Der Linux-Importer erzeugt Inventar, SHA-256-Dateimanifeste, Modreihenfolge und
+SQLite-integrity_check auf den extrahierten/kopierten Daten. Ein eingebettetes
+Windows-Manifest ist beim rohen Persistence-File-Drop nicht erforderlich.
+Das vorhandene portable schema-3-Backupformat und ältere Source-Transferformat
+bleiben unterstützt; es entsteht kein zweiter Export-/Restoremechanismus.
 
-The initial imported-world gate is exactly 42.21.0. If the public package has
-moved, an old startup log cannot satisfy the new build's gate. Keep the pristine
-copy and report `BLOCKED_VERSION`; obtain a legitimate compatible package or make
-an explicit, separately reviewed migration decision. Do not guess depot IDs.
+Neben szs-final.tar.gz einen privaten szs-final.tar.gz.sha256 erzeugen, entweder
+mit dem einzelnen SHA-256-Wert oder der Zeile HASH  szs-final.tar.gz. Das schützt
+die Übertragung; Linux prüft zusätzlich enthaltene Dateien und Datenbanken.
+Archiv und Sidecar bleiben außerhalb von Git.
 
-## Network and bot settings
+**Wird nach dem Export erneut gespielt, ist das Archiv nur noch historisch.
+Nach dem letzten Spielbetrieb erneut speichern, vollständig stoppen und frisch
+exportieren.**
 
-For deliberate LAN/public operation set `PZ_BIND_ADDRESS=0.0.0.0` in private
-`.env`, configure the host firewall/router for the two selected **UDP game**
-ports, and set advertised LAN/VPN/public endpoints. RCON and the ops API remain
-unpublished. Confirm the intended interface and ports with `docker compose ps`.
+## 3. Privaten File-Drop übertragen und importieren
 
-Generate a new private API token on the destination. Supply the Discord token
-separately only if enabling the `discord` profile; stop the old bot before
-starting its replacement. Never run two deployments with the same bot token.
+Vom Rechner mit den privaten Dateien, Platzhalter ersetzen:
 
-Verify status, players, save/quit, mod state and backup creation. Perform a client
-join/rejoin and a representative restored-world check before directing production
-players to the new host. Historical reference archives from an original import
-remain in the source backup volume and are not recursively included in operational
-handoff archives; transfer those separately if you need their private provenance.
+~~~bash
+scp szs-final.tar.gz szs-final.tar.gz.sha256 \
+  BENUTZER@SERVER:~/pz-docker-server/imports/
+~~~
+
+Auf Debian im Codeverzeichnis, mit gestopptem Test-/Versionsprüfprojekt und
+**neuem leerem Live-Datenziel**:
+
+~~~bash
+chmod 640 imports/szs-final.tar.gz imports/szs-final.tar.gz.sha256
+sudo chgrp 1000 imports/szs-final.tar.gz imports/szs-final.tar.gz.sha256
+docker compose --env-file .env.live build pz-server pz-ops
+./pz --env-file .env.live import --archive imports/szs-final.tar.gz \
+  --sha256-file imports/szs-final.tar.gz.sha256
+~~~
+
+Der Wrapper bindet nur den privaten Archivordner read-only in netzlose Tools ein.
+Der gemeinsame Parser prüft Pfade, Größen, Einträge und Hashes; Import prüft Kopien,
+Inventar, INI-Reihenfolge und SQLite. Auch nach einem Volumewechsel veröffentlichte
+Dateien werden erneut gehasht. Es entstehen private Referenzprovenienz, geschütztes
+pristine Backup und zuletzt die Import-Fertigmarkierung. Der exakte 42.21.0-Gate
+bleibt erhalten.
+
+Erfolgreicher Import meldet **desired=false** und startet Java nicht.
+Unvollständige/fehlerhafte Ziele offline lassen und ein neues Ziel verwenden;
+vorhandene private Daten nicht für einen erneuten Versuch löschen.
+
+## 4. Explizit starten und neuen finalen Stand prüfen
+
+~~~bash
+docker compose --env-file .env.live up -d pz-server pz-ops
+./pz --env-file .env.live status
+./pz --env-file .env.live version
+./pz --env-file .env.live config-state
+./pz --env-file .env.live start
+./pz --env-file .env.live health
+./pz --env-file .env.live workshop-status
+~~~
+
+Nur mit bestätigter 42.21.0 und gültigem Pristine-Gate starten. READY verlangt
+eigenen Prozess, beide UDP-Sockets und authentifiziertes RCON/lesbare Spielerzahl.
+Mit vollständig neu gestartetem Client auf den Debian-Host, Port 16261 verbinden;
+Account, lebenden Charakter, erwarteten **letzten** Spielstand und repräsentative
+Mods prüfen. Live-Spielerpasswort kommt aus der privaten Windows-Konfiguration.
+Anschließend erstes reguläres Backup erstellen und Ergebnisse privat festhalten.
+Alten Server gestoppt halten, damit keine zwei auseinanderlaufenden Welten entstehen.
+
+Ein einmaliges Workshop-Downloadproblem ist kein Nachweis einer beschädigten
+Welt: Workshop-Status, aktuellen Job und privates Log prüfen, später bewusst
+erneut starten. Keine Mods oder Charakterdaten automatisch entfernen.
+
+## 5. Normalbetrieb, Testwechsel und Recovery
+
+Normalerweise läuft nur Live. Für Tests Live Save/Quit und Controlcontainer
+stoppen; dann Test auf **16261:16261/udp und 16262:16262/udp** starten. Anschließend
+Test ebenso stoppen und Live starten. Gestoppte Datenvolumes bleiben erhalten.
+Alternative Hostports sind konfigurierbar, aber nicht abgenommen: der frühere
+Versatz 17261/17262 verursachte Connection Failed nach Steam-Handshake. Späterer
+Parallelbetrieb braucht eine zweite Host-IP oder ein bewusstes Netzwerkdesign.
+
+Backups, Archivexport, Restore in neue Ziele, Updates, Wartung, dauerhafte Jobs,
+Reboot-Intent und optionales Discord stehen im README. Restore startet nicht
+automatisch. Eine unterbrochene Publikation bleibt durch ihr Journal gesperrt;
+Originalarchiv in ein neues Ziel übernehmen statt Marker zu entfernen.
+Code-Rollback ersetzt keine Weltwiederherstellung und bewirkt keinen Steam-Downgrade.
+
+Die bereits geprüfte private Restore-Kopie bekommt bewusst keinen separaten
+menschlichen Client-Test mehr; das ist kein Migrationsblocker. Noch ausstehend
+sind tatsächliche Debian-Installation/finaler Cutover und optional echte Discord-
+Abnahme. Diese Finalisierung veröffentlicht nichts auf GitHub und verändert weder
+Windows-Quellbestand noch frühere private Archive.

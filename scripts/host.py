@@ -48,6 +48,7 @@ def main():
     parser.add_argument("value", nargs="?")
     parser.add_argument("--source")
     parser.add_argument("--archive")
+    parser.add_argument('--sha256-file', help='Adjacent external SHA-256 sidecar for import/restore')
     parser.add_argument("--backup")
     parser.add_argument("--output")
     parser.add_argument("--force", action="store_true")
@@ -65,17 +66,34 @@ def main():
         os.environ["COMPOSE_ENV_FILES"] = str(Path(args.env_file).resolve(strict=True))
     try:
         if args.action == "init-secrets":
-            path = ROOT / "secrets"
-            path.mkdir(mode=0o700, exist_ok=True)
-            token = path / "api.token"
-            if not token.exists():
-                fd = os.open(token, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(fd, "w") as stream:
-                    stream.write(secrets.token_urlsafe(48) + "\n")
-            (path / "discord.token").touch(mode=0o600, exist_ok=True)
+            resolved = json.loads(compose('--profile', 'discord', 'config', '--format', 'json', capture=True))
+            for key in ('api_token', 'discord_token'):
+                path = Path(resolved['secrets'][key]['file'])
+                path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                try:
+                    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    continue
+                with os.fdopen(fd, 'w') as stream:
+                    stream.write(secrets.token_urlsafe(48) + '\n' if key == 'api_token' else '')
             print("Private secret files initialized; values were not displayed.")
         elif args.action == "logs":
-            compose("exec", "-T", "pz-ops", "python", "-c", "from pathlib import Path;print('\n'.join(Path('/pz/logs/game-console.log').read_text(errors='replace').splitlines()[-100:]))")
+            compose('exec', '-T', 'pz-ops', 'python', '-m', 'pzops.logs')
+        elif args.action in ('import', 'restore') and args.archive:
+            if args.source:
+                parser.error('use either --source or --archive')
+            archive = Path(args.archive).resolve(strict=True)
+            sidecar = Path(args.sha256_file).resolve(strict=True) if args.sha256_file else archive.with_name(archive.name + '.sha256')
+            values = ['--archive', archive.name]
+            if sidecar.exists():
+                if sidecar.parent != archive.parent:
+                    parser.error('SHA-256 sidecar must be beside the archive')
+                values += ['--sha256-file', sidecar.name]
+            if args.action == 'restore' and args.confirm_replace:
+                values.append('--confirm-replace')
+            elif args.action == 'import' and args.confirm_replace:
+                parser.error('archive import requires a new empty target')
+            tool('import-archive' if args.action == 'import' else 'restore', values, source=archive.parent)
         elif args.action == "init-empty":
             tool("empty", [])
         elif args.action == "import":
@@ -92,9 +110,6 @@ def main():
                 raise RuntimeError("SOURCE_CHANGED_DURING_IMPORT")
             # Keep the private transfer and SHA inventory for operator provenance;
             # cleanup is explicit, outside the public tree.
-        elif args.action == "restore" and args.archive:
-            archive = Path(args.archive).resolve(strict=True)
-            tool("restore", ["--archive", archive.name] + (["--confirm-replace"] if args.confirm_replace else []), source=archive.parent)
         elif args.action == "export":
             if not args.backup or not args.output:
                 parser.error("export requires --backup NAME and --output FILE.tar.gz")

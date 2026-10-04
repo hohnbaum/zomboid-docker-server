@@ -1,118 +1,141 @@
-# Private migration, backup and restore
+# Persistenz, privater File-Drop und Restore
 
-The source snapshot remains read-only evidence. Git contains code and synthetic
-tests only. Original private discovery documents are preserved outside Git.
-See CURRENT-SYSTEM.md for the Windows baseline and TEST-REPORT.md for acceptance.
+Die abgenommene private Docker-Kopie ist ein erfolgreicher Migrationsnachweis,
+kein finaler Produktionsstand. Für den Cutover kommt ein **neues Archiv nach
+dem letzten Spielbetrieb** vom kontrolliert gespeicherten/gestoppten Windows-Server.
+[Handoff](LINUX-HANDOFF.md) und [README](../README.md) enthalten die Bedienbefehle.
 
-## Source disposition and import
+## Persistence-Contract und Quellen
 
-Import derives the configured server name and selects its four active Server
-files: INI, SandboxVars, spawnpoints and spawnregions. It copies the entire
-Saves/Multiplayer/server directory, matching account database, options.ini,
-Lua/SkillRecoveryJournal/Multiplayer/server and the complete Lua/ttf_stats_mp tree.
-SQLite and world journal files are copied rather than reconstructed.
+Aktiv übernommen werden die vier Serverkonfigurationsdateien der gewählten Instanz,
+die vollständige Saves/Multiplayer/SERVERNAME-Welt einschließlich Player-/Vehicle-
+DB und Journals, db/SERVERNAME.db einschließlich vorhandener WAL-/SHM-/Journaldateien,
+alle persistenten Lua-Dateien außer Diagnose-.log-Dateien und options.ini.
+Unbekannte Persistenz innerhalb der aktiven Welt/Lua wird nicht auf zwei bekannte
+Mods beschränkt. Andere Instanz-/Referenzdateien werden geschützt privat gehalten.
 
-Other source-instance files are preserved in a protected import-reference archive
-with per-file hashes/disposition: old/test configurations, generated references,
-console/diagnostic files, historical native ZIPs and unknown additions. Native ZIPs
-never enter the live rotating backup set. Windows app files, Workshop and venv are
-not copied. Exact WorkshopItems/Mods/Map order and case is read from the INI.
+App, Windows-Binaries/Java/venv, Steam-/Workshop-Cache, Runtime-Logs, Steuerdateien,
+Secrets und historische native Backup-ZIPs sind keine aktive Welt. Ein roher
+File-Drop enthält nur Server/, Saves/, db/, Lua/ und options.ini an der Archivwurzel.
+Kein zusätzlicher Windows-Exporthelfer wird eingeführt.
 
-Configure a new explicit Compose project and matching PZ_SERVER_NAME. Build the
-ops image, keep both control services stopped, then run:
+Vor Archivierung Spieler abmelden, save/quit und vollständigen Prozess-Exit prüfen;
+automatischen Wiederstart deaktivieren. Aktive alte Mod-/Config-Pending-Vorgänge
+vorher kontrolliert abschließen. Wiederaufgenommener Spielbetrieb macht das Archiv
+historisch; für den Cutover nochmals frisch gestoppt exportieren.
 
-~~~sh
-./pz import --source /private/stopped-instance
+## Ein gemeinsamer Archiveingang
+
+Der vorhandene begrenzte Extractor unterstützt:
+
+| Format | Struktur | Validierung |
+| --- | --- | --- |
+| Roher Persistence-File-Drop | Server/, Saves/, db/, Lua/, options.ini | Linux erzeugt Inventar/Dateimanifest und prüft die kopierten Daten |
+| Vorhandenes portables Backup | data/, optional state/, manifest.json, _backup.json | Schema-3-Abschlussmetadaten, vollständiges Manifest und Pending-Provenienz |
+| Bestehender nativer Source-Transfer | instance/ plus source-manifest.json | Extraktionsinventar muss vollständig zum Quellmanifest passen |
+
+Es gibt keine parallele neue Backup-/Restoreimplementierung. Absolute Pfade,
+Traversal, Links, Spezialdateien, Duplikate und Case-Collisions werden verweigert;
+Eintragszahl und entpackte Größe sind begrenzt. Archivinhalte können nicht außerhalb
+des privaten Stagingpfads geschrieben werden.
+
+Ein optionaler externer SHA-256-Sidecar wird vor Verarbeitung geprüft. Für den
+finalen Cutover **immer mit übertragen und explizit angeben**. Akzeptiert werden
+ein einzelner Hash oder HASH  ARCHIVBASENAME (auch üblicher *-Dateimarker).
+Ein falscher Hash, mehrzeiliger/ungültiger Sidecar oder anderer Dateiname scheitert.
+Ohne explizite Option verwendet der Wrapper den angrenzenden ARCHIVNAME.sha256,
+falls vorhanden; Sidecar und Archiv müssen im selben Ordner liegen.
+
+~~~bash
+./pz --env-file .env.live import --archive imports/szs-final.tar.gz \
+  --sha256-file imports/szs-final.tar.gz.sha256
 ~~~
 
-The host wrapper creates an ignored private transfer archive and SHA inventory
-using native host reads, avoiding repeated small-file NTFS/WSL crossings.
-It rejects links/case collisions, fingerprints source before and after packing,
-transfers one read-only archive and rechecks the original source after import.
-Private transfer files remain under ignored tmp for operator provenance.
+Beide Controldienste müssen vorher gestoppt sein; das Datenziel muss neu/leer sein.
+Der Wrapper bindet nur den Archivordner read-only ein. Tools sind netzlos und laufen
+nach Volumeinitialisierung als UID/GID 1000, mit Lifecycle- und Game-Kernelguards.
 
-Networkless tools extract bounded regular files/safe directories into Linux staging.
-Absolute paths, traversal, links, special members, duplicates and case collisions
-fail. Extracted hashes must match the source manifest before normal import begins.
+Import verifiziert Original-/Kopierhashes, Inventar, genaue WorkshopItems/Mods/Map-
+Reihenfolge und SQLite **PRAGMA integrity_check** auf den Kopien. Nach einem
+Volumewechsel wird die tatsächlich veröffentlichte Welt erneut gehasht; Dateien
+und Linux-Verzeichnisse werden synchronisiert. Erst danach werden Gate, geprüftes
+geschütztes pristine Backup und **zuletzt** die Fertigmarkierung veröffentlicht.
+Intent bleibt desired=false. Der Import startet Java nicht.
 
-Normal import requires an empty target and desired=false, takes lifecycle/game
-locks, stages all copies, validates hashes/counts, exact INI arrays and copied SQLite
-PRAGMA quick_check, and checks source inventory again. It publishes reference
-provenance, active data, an exact migration gate and a protected pristine backup.
-import-complete is published LAST after pristine verification. Java never starts.
+Backupimport benutzt denselben Restoreweg und erstellt seine neue Importprovenienz/
+Pristine-Evidenz. Ein deklarierter anderer PZ-Gate/Versionsstand wird vor Publikation
+verweigert. Der Erstimport bleibt exakt auf 42.21.0 begrenzt; aktuelle Linux-
+Start-Evidenz muss zum installierten Build gehören. Alte Windows-Logs zählen nicht.
 
-Interrupted/partial imports stay offline. Inspect staging/provenance or choose a
-new empty project; directory presence alone is not completion. The initial version
-gate is exactly 42.21.0. Only Linux startup evidence tied to the installed Steam
-build can satisfy it; imported Windows console logs cannot.
+Der ältere import --source VERZEICHNIS bleibt kompatibel: Der bereits vorhandene
+Hosttransfer liest die gestoppte Quelle nativ, archiviert mit SHA-Inventar unter
+ignoriertem tmp/, prüft die Quelle vorher/nachher und übergibt eine read-only-Datei.
+Der neue File-Drop benötigt diesen Hostproducer nicht.
 
-## Full operational backups
+## Vollständige Betriebsbackups
 
-Backups run after graceful game exit or on already stopped data. A permanent game
-kernel lock independently prevents live copying. Persistence includes complete
-Server/Saves/db/Lua, options.ini, approved migration markers and coherent pending
-plan/config history. App/Workshop, logs, tokens, sockets, job/lock state and old
-native ZIP collections are excluded. Lua diagnostic .log files are excluded.
+Backups entstehen nach kontrolliertem Spielende oder aus schon gestoppten Daten.
+Ein dauerhafter Game-Kernellock verhindert unabhängig von Prozesslisten Live-Kopien.
+Sie umfassen Server/Saves/db/Lua/options, erlaubte Migrationsmarker und kohärente
+Pending-/Config-Provenienz. App/Workshop, Logs, Tokens, Socket-/Job-/Lockzustand
+und alte native ZIP-Sammlungen sind ausgeschlossen.
 
-Creation uses same-volume .inprogress staging, original/copy/rechecked-source SHA
-and byte inventories, copied database checks, manifest.json and schema-3
-_backup.json completion metadata written last. Verification precedes atomic
-directory rename. Protected known-good and reference archives are never retained
-through the rotating deletion policy.
+Erzeugung verwendet .inprogress-Staging auf dem Backupvolume, Original-/Kopier-/
+erneute Quellhashes und Inventare, kopierte SQLite-Prüfungen, manifest.json und
+zuletzt schema-3-_backup.json. Verifikation geht der atomaren Verzeichnisumbenennung
+voraus. Geschützte pristine-/Referenzbackups gehören nicht zur rotierenden Löschung.
 
-The catalog checks strict name/schema/status/server, manifest checksum, counts,
-bytes, UTC completion time and required structure. It avoids rehashing every
-world file on each health read; full file verification occurs at creation, export
-and restore. All backup-age readers use it. Retention keeps four newest plus up
-to four older UTC ISO-week anchors, preferring non-daily entries within an older week.
+Der Katalog prüft Name/Schema/Status/Server, Manifestchecksumme, Dateien/Bytes,
+UTC-Abschluss und Struktur. Health hasht nicht bei jedem Read die ganze Welt;
+vollständige Prüfung erfolgt bei Erzeugung, Export und Restore. Alle Backup-
+Alterswerte nutzen denselben abgeschlossenen Katalog. Retention behält vier neueste
+Backups plus bis zu vier ältere UTC-ISO-Wochenanker.
 
-A running backup action saves/stops, copies and freshly restarts; a deliberately
-stopped deployment stays stopped. Pending is acknowledged only after a successful
-fresh readiness barrier. Update/Workshop/config operations select their safety type.
+Ein Backupjob eines laufenden Servers stoppt und startet frisch. Ein absichtlich
+gestoppter Server bleibt gestoppt. Pending wird nur nach einem frischen READY-
+Barrier intern bestätigt. Update-/Workshop-/Config-Jobs verwenden Safety-Backups.
 
-## Archive and restore
+## Export und Restore
 
-With control services stopped, export a completed snapshot:
+Mit gestoppten Controldiensten:
 
-~~~sh
-./pz export --backup BACKUP_NAME --output exports/private-handoff.tar.gz
+~~~bash
+./pz --env-file .env.live export --backup BACKUP_NAME \
+  --output exports/private-handoff.tar.gz
 ~~~
 
-Export verifies the snapshot and creates an exclusive tar.gz with SHA256 output.
-This archive contains private credentials/player data; Git alone cannot restore it.
+Export prüft den Snapshot und erzeugt tar.gz plus angrenzenden SHA-256-Sidecar.
+Bestehende Archiv-/Sidecardateien werden nicht überschrieben. Das Archiv enthält
+private Spielerdaten/Zugangsdaten; Git allein kann die Welt nicht wiederherstellen.
 
-Restore to a new empty explicitly named Compose target is preferred:
+Ein neues explizites Projekt mit passenden Servernamen und eigenen Secrets wählen:
 
-~~~sh
-./pz restore --archive /private/handoff.tar.gz
+~~~bash
+./pz --env-file .env.restore restore --archive imports/private-handoff.tar.gz \
+  --sha256-file imports/private-handoff.tar.gz.sha256
 ~~~
 
-The project and server name select the target. Offline tools require stopped
-control services/false intent. Online named-backup restore also verifies child
-stopped and desired=false. Existing replacement additionally requires
---confirm-replace, locks and a protected pre-restore backup. No PID, socket,
-job or stale lock is restored. Permanent guard inodes survive replacement.
+Restore prüft Manifestchecksumme, sämtliche Datei-Hashes/Größen, tatsächliches Inventar,
+Persistenzbereich, Servername, SQLite und kompletten Pending-/History-Replay.
+Kein PID, Socket, Job oder stale Lock wird wiederhergestellt. Permanente Guard-
+Inodes bleiben erhalten. Bei Migrationsdaten wird Pristine-Evidenz erneut erzeugt.
 
-Extraction rejects absolute/traversal/link/special/duplicate paths and enforces
-size/entry limits. Restore verifies every file hash/size, manifest checksum,
-actual inventory, counts, persistence scope, server name, database integrity and
-complete pending plan/history replay. Stale control paths cannot be introduced
-through an edited manifest. Imported restored backups keep the migration gate
-and receive verified restored-pristine evidence.
+Staging wird vor Publikation erneut gehasht und synchronisiert. RESTORE_COPY_MISMATCH
+verweigert den Eingriff vor Veröffentlichung. Auch die tatsächlichen Daten **nach**
+Veröffentlichung über Volumegrenzen werden geprüft; RESTORE_PUBLICATION_MISMATCH
+behält das sperrende Journal. Multi-Verzeichnis-Publikation ist kein atomarer
+Volumeswitch. Unterbrechung/Fehler lassen false Intent und Recovery-Sperre zurück.
 
-The copied staging tree is hashed again against the archive manifest before any
-target publication. Copied files and Linux directories are synced before writing
-the restore journal. Copy corruption is refused as RESTORE_COPY_MISMATCH.
+Vorhandene Daten ersetzen erfordert --confirm-replace, false Intent, gestopptes
+Spiel, Locks und ein geschütztes Pre-Restore-Backup. Ein unterbrochenes Ziel offline
+lassen; Originalarchiv in ein **neues** Projekt restoren statt Journal/Guard zu löschen.
+Archive/Quellen bleiben erhalten. Restore startet nie selbst.
 
-Publication is staged and journaled, leaving desired=false. Multi-directory
-replacement is not an atomic volume switch. Interrupted restore preserves its
-journal/staging and blocks startup. Restoring the original verified archive into a
-new empty project is the supported recovery; keep the interrupted target offline.
+## Abnahme
 
-## Acceptance and handoff
-
-An archive round trip alone is not running restore acceptance. The test must reach
-READY, gracefully stop, create a full backup, introduce a harmless post-backup
-marker, restore into a second empty target, prove hashes/marker absence, start the
-restored game and reach READY. Human client checks cover account/character/vehicle/
-world and mod persistence separately. See TEST-REPORT.md and LINUX-HANDOFF.md.
+Disposable Runtime-Restore erreichte bereits READY nach vollständigem Backup-/
+Marker-/Restore-Smoke. Die private importierte Welt wurde inzwischen auch menschlich
+mit vorhandenem Account/lebendem Charakter und repräsentativen Mods abgenommen.
+Zusätzlicher menschlicher Test der hash-/DB-verifizierten privaten Restore-Kopie
+wird bewusst ausgelassen und ist kein Blocker. Für den finalen neuen Produktionsstand
+bleibt ein kurzer Client-Check nach Cutover nötig. [Testbericht](TEST-REPORT.md).

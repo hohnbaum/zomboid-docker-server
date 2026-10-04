@@ -5,6 +5,20 @@ socket, privileged service, arbitrary shell endpoint or external database.
 Historical Windows behavior is in CURRENT-SYSTEM.md; current test evidence is
 recorded separately in TEST-REPORT.md.
 
+## Debian deployment profiles
+
+Permanent test and live projects each own separate app, Workshop, data, state,
+control, backups, logs and private secret paths. PZ_SECRETS_DIR selects per-profile
+API/Discord files; init-secrets resolves Compose paths and never replaces an
+existing token. Files remain private and readable by container UID/GID 1000.
+The optional temporary empty versioncheck project establishes Linux startup
+evidence on the independent live app volume, without touching the live world.
+
+The supported deployment publishes native UDP 16261:16261 and 16262:16262.
+Test and live run sequentially on one host IP; stopping a game child does not
+release Docker's published ports, so also stop the unused control containers.
+Alternate host ports remain configurable but are not accepted live evidence.
+
 ~~~mermaid
 flowchart LR
   CLI[Host pz wrapper] -->|Compose exec| OPS[pz-ops]
@@ -60,7 +74,8 @@ sequential tests; independent deployments should use separate app volumes.
 
 The control network is internal; ops has only this network. The server also has
 game/Steam egress and Discord has its own egress. Only game UDP 16261/16262 is
-published, initially to 127.0.0.1 with configurable host ports. RCON, the ops API
+published, to 0.0.0.0 in Debian test/live examples and 127.0.0.1 in the legacy
+local default. Alternate external ports are unverified. RCON, the ops API
 and the Unix socket are unpublished. Advertised endpoints are configured in
 private deployment settings; no container-IP or host discovery is shown to players.
 
@@ -119,3 +134,10 @@ Workshop reports derive exact configured ID order, read manifest/content evidenc
 and compare advisory remote timestamps. API failure remains Unknown. An explicit
 Workshop job backs up, stops and performs a fresh PZ startup/download, collecting
 before/after evidence and unresolved items. READY does not prove mod compatibility.
+
+Workshop download failures are advisory diagnoses from the current launch log
+offset only. Clearly matching failures produce WORKSHOP_DOWNLOAD_FAILED in agent
+status and START_WORKSHOP_DOWNLOAD_FAILED for readiness; unclear exits retain
+START_PROCESS_EXITED. Neither code includes raw logs or item IDs, and neither
+deletes a mod or edits world data. Log tails are local private module calls rather
+than Python--c strings passed through multiple shell quoting layers.

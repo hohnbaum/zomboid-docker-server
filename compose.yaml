@@ -135,6 +135,6 @@ networks:
   discord_egress: {}
 secrets:
   api_token:
-    file: ./secrets/api.token
+    file: ${PZ_SECRETS_DIR:-./secrets}/api.token
   discord_token:
-    file: ./secrets/discord.token
+    file: ${PZ_SECRETS_DIR:-./secrets}/discord.token

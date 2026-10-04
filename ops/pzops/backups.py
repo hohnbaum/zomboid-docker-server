@@ -37,7 +37,7 @@ def database_check(root):
         # Only staging/copy data is passed by callers. No immutable mode hides journals.
         try:
             with closing(sqlite3.connect(p.resolve().as_uri() + "?mode=ro", uri=True)) as db:
-                rows = list(db.execute("PRAGMA quick_check"))
+                rows = list(db.execute("PRAGMA integrity_check"))
             if rows != [("ok",)]:
                 raise PZError("DATABASE_INTEGRITY_FAILED")
         except sqlite3.Error:
@@ -237,6 +237,16 @@ def restore(layout, snapshot, confirm_replace=False, desired=False, running=Fals
                 p.unlink()
         for p in (stage / "state").iterdir():
             shutil.move(str(p), layout.state / p.name)
+        published = {key: {'bytes': path.stat().st_size, 'sha256': file_hash(path)} for key, path in persistent_files(layout)}
+        if published != read_json(Path(snapshot) / 'manifest.json'):
+            raise PZError('RESTORE_PUBLICATION_MISMATCH')
+        for _, copied in persistent_files(layout):
+            with copied.open('r+b') as durable:
+                os.fsync(durable.fileno())
+        if os.name != 'nt':
+            for root in (layout.data, layout.state):
+                for directory, _, _ in os.walk(root, topdown=False):
+                    sync_dir(directory)
         if (layout.data / ".migration-gate.json").exists():
             write_json(layout.data / ".pristine-verified.json", {"backup": Path(snapshot).name, "manifest_hash": meta["ManifestHash"], "verified_restore": True})
         write_json(layout.state / "intent.json", {"desired": False, "updated_at": now()})
@@ -253,7 +263,8 @@ def export_archive(layout, name, target):
     source = confined(layout.backups, name)
     verify(source, layout.server)
     target = Path(target)
-    if target.exists():
+    sidecar = target.with_name(target.name + '.sha256')
+    if target.exists() or sidecar.exists():
         raise PZError("EXPORT_TARGET_EXISTS")
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(".export-" + uuid.uuid4().hex)
@@ -270,10 +281,29 @@ def export_archive(layout, name, target):
     finally:
         if temp.exists():
             temp.unlink()
-    return {"exported": target.name, "bytes": target.stat().st_size, "sha256": file_hash(target)}
+    checksum = file_hash(target)
+    atomic_bytes(sidecar, (checksum + '  ' + target.name + '\n').encode())
+    return {"exported": target.name, "bytes": target.stat().st_size, "sha256": checksum, 'sidecar': sidecar.name}
 
 
-def extract_archive(archive_path, target):
+def verify_archive_checksum(archive, sidecar=None):
+    actual = file_hash(archive)
+    if sidecar is not None:
+        try:
+            text = Path(sidecar).read_text(encoding='utf-8-sig').strip()
+        except (OSError, UnicodeError):
+            raise PZError('ARCHIVE_CHECKSUM_INVALID') from None
+        match = re.fullmatch(r'([a-fA-F0-9]{64})(?:[ \t]+\*?([^\r\n]+))?', text)
+        if not match or (match[2] is not None and match[2] != Path(archive).name):
+            raise PZError('ARCHIVE_CHECKSUM_INVALID')
+        if match[1].lower() != actual:
+            raise PZError('ARCHIVE_CHECKSUM_MISMATCH')
+    return actual
+
+
+def extract_archive(archive_path, target, kind='backup'):
+    if kind not in ('backup', 'instance', 'flat'):
+        raise PZError('UNSAFE_ARCHIVE_MEMBER')
     target = Path(target)
     target.mkdir(parents=True, exist_ok=False)
     seen = set()
@@ -281,13 +311,19 @@ def extract_archive(archive_path, target):
     try:
         with tarfile.open(archive_path, "r:*") as archive:
             for member in archive:
-                key = member.name
+                key = member.name.rstrip('/') if member.isdir() else member.name
                 path = confined(target, key)
                 if key.casefold() in seen or not (member.isfile() or member.isdir()) or member.size < 0:
                     raise PZError("UNSAFE_ARCHIVE_MEMBER")
                 seen.add(key.casefold())
+                top = key.split('/')[0]
+                source_allowed = (kind == 'instance' and (key.startswith('instance/') or (key == 'instance' and member.isdir()) or (key == 'source-manifest.json' and member.isfile()))) or (kind == 'flat' and top in DATA_ROOTS and not (top == 'options.ini' and (member.isdir() or '/' in key)))
+                if kind != 'backup' and not source_allowed:
+                    raise PZError('UNSAFE_ARCHIVE_MEMBER')
+                if len(seen) > 2000000:
+                    raise PZError('ARCHIVE_LIMIT_EXCEEDED')
                 if member.isdir():
-                    if key not in ("data/Server", "data/Saves", "data/db", "data/Lua"):
+                    if kind == 'backup' and key not in ("data/Server", "data/Saves", "data/db", "data/Lua"):
                         raise PZError("UNSAFE_ARCHIVE_MEMBER")
                     path.mkdir(parents=True, exist_ok=True)
                     continue
@@ -297,7 +333,11 @@ def extract_archive(archive_path, target):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with archive.extractfile(member) as inp, path.open("xb") as out:
                     shutil.copyfileobj(inp, out)
-        verify(target)
+        if kind == 'backup':
+            verify(target)
+        elif kind == 'instance':
+            if manifest(target / 'instance') != read_json(target / 'source-manifest.json'):
+                raise PZError('SOURCE_TRANSFER_HASH_MISMATCH')
         return target
     except Exception:
         shutil.rmtree(target)

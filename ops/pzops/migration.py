@@ -6,44 +6,57 @@ import tarfile
 import uuid
 from pathlib import Path
 from pzops.ini import Ini
-from pzops.util import PZError, atomic_bytes, confined, file_hash, manifest, now, read_json, tree_files, write_json
+from pzops.util import PZError, atomic_bytes, confined, file_hash, manifest, now, read_json, sync_dir, tree_files, write_json
 from pzops import backups
 
 
 def disposition(key, server):
     if key in {"options.ini", *["Server/" + server + x for x in (".ini", "_SandboxVars.lua", "_spawnpoints.lua", "_spawnregions.lua")], "db/" + server + ".db"}:
         return "active"
-    if key.startswith("Saves/Multiplayer/" + server + "/") or key.startswith("Lua/SkillRecoveryJournal/Multiplayer/" + server + "/") or key.startswith("Lua/ttf_stats_mp/"):
+    if key in {'db/' + server + '.db' + suffix for suffix in ('-wal', '-shm', '-journal')}:
+        return 'active'
+    if key.startswith("Saves/Multiplayer/" + server + "/") or (key.startswith('Lua/') and not key.lower().endswith('.log')):
         return "active"
     return "reference"
 
 
 def import_archive(layout, archive):
+    # Native source transfer and private file-drop reuse one bounded extractor.
+    if any(p.name != '.game-runtime.guard' for p in layout.data.iterdir()):
+        raise PZError('TARGET_NOT_EMPTY')
     stage = Path(tempfile.mkdtemp(prefix=".source-transfer-", dir=layout.backups))
-    seen, total = set(), 0
+    stage.rmdir()
     try:
         with tarfile.open(archive, "r:*") as stream:
-            for member in stream:
-                path = confined(stage, member.name)
-                if not (member.isfile() or member.isdir()) or member.name.casefold() in seen or not (member.name == "source-manifest.json" or member.name.startswith("instance/")):
-                    raise PZError("UNSAFE_ARCHIVE_MEMBER")
-                seen.add(member.name.casefold())
-                total += member.size
-                if member.size < 0 or total > 100 * 1024**3 or len(seen) > 2000000:
-                    raise PZError("ARCHIVE_LIMIT_EXCEEDED")
-                if member.isdir():
-                    if not member.name.startswith("instance/"):
-                        raise PZError("UNSAFE_ARCHIVE_MEMBER")
-                    path.mkdir(parents=True, exist_ok=True)
-                    continue
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with stream.extractfile(member) as inp, path.open("xb") as out:
-                    shutil.copyfileobj(inp, out)
-        if manifest(stage / "instance") != read_json(stage / "source-manifest.json"):
-            raise PZError("SOURCE_TRANSFER_HASH_MISMATCH")
-        return import_instance(layout, stage / "instance")
+            first = stream.next()
+        if first is None:
+            raise PZError('IMPORT_SOURCE_INCOMPLETE')
+        top = first.name.rstrip('/').split('/')[0]
+        kind = 'instance' if top in ('instance', 'source-manifest.json') else 'flat' if top in backups.DATA_ROOTS else 'backup'
+        before = file_hash(archive)
+        backups.extract_archive(archive, stage, kind=kind)
+        if file_hash(archive) != before:
+            raise PZError('ARCHIVE_CHANGED_DURING_IMPORT')
+        if kind != 'backup':
+            return import_instance(layout, stage / 'instance' if kind == 'instance' else stage)
+        metadata = read_json(stage / '_backup.json')
+        declared = metadata.get('Version')
+        if isinstance(declared, dict):
+            declared = declared.get('version')
+        gate = read_json(stage / 'data/.migration-gate.json') or read_json(stage / 'data/.import-complete.json')
+        if (declared is not None and declared != '42.21.0') or (gate and gate.get('required_version') != '42.21.0'):
+            raise PZError('BLOCKED_VERSION')
+        restored = backups.restore(layout, stage, _locked=True)
+        write_json(layout.data / '.migration-gate.json', {'required_version': '42.21.0', 'server': layout.server})
+        pristine = backups.create(layout, protected=True, _locked=True)
+        write_json(layout.data / '.pristine-verified.json', {'backup': pristine['name'], 'manifest_hash': pristine['ManifestHash']})
+        marker = {'server': layout.server, 'required_version': '42.21.0', 'created_at': now(),
+                  'archive_sha256': before, 'pristine_backup': pristine['name'], 'desired': False}
+        write_json(layout.data / '.import-complete.json', marker)
+        return {**restored, **marker}
     finally:
-        shutil.rmtree(stage)
+        if stage.exists():
+            shutil.rmtree(stage)
 
 
 def init_empty(layout):
@@ -53,7 +66,7 @@ def init_empty(layout):
         (layout.data / folder).mkdir()
     # Generated synthetic credentials are intentionally absent from repository fixtures.
     values = {"DefaultPort": "16261", "UDPPort": "16262", "RCONPort": "27015",
-              "RCONPassword": secrets.token_urlsafe(32), "Password": secrets.token_urlsafe(24),
+              "RCONPassword": secrets.token_urlsafe(32), "Password": "",
               "WorkshopItems": "", "Mods": "", "Map": "Muldraugh, KY", "Public": "false",
               "Open": "true", "UPnP": "false", "MaxPlayers": "4", "PauseEmpty": "true"}
     atomic_bytes(layout.ini, "".join(k + "=" + v + "\n" for k, v in values.items()).encode())
@@ -107,6 +120,17 @@ def import_instance(layout, source):
         write_json(reference_target / "import-manifest.json", classified)
         for p in active.iterdir():
             shutil.move(str(p), layout.data / p.name)
+        expected_active = {k: before[k] for k, value in classified.items() if value['disposition'] == 'active'}
+        published = {key: {'bytes': copied.stat().st_size, 'sha256': file_hash(copied)} for key, copied in tree_files(layout.data) if key != '.game-runtime.guard'}
+        if published != expected_active:
+            raise PZError('IMPORT_COPY_MISMATCH')
+        for key, copied in tree_files(layout.data):
+            if key != '.game-runtime.guard':
+                with copied.open('r+b') as durable:
+                    os.fsync(durable.fileno())
+        if os.name != 'nt':
+            for directory, _, _ in os.walk(layout.data, topdown=False):
+                sync_dir(directory)
         marker = {"server": layout.server, "required_version": "42.21.0", "created_at": now(),
                   "reference": ident, "source_files": len(before), "source_bytes": sum(x["bytes"] for x in before.values()),
                   "active_files": sum(x["disposition"] == "active" for x in classified.values()), "databases_checked": databases}

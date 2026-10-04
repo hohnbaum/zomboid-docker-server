@@ -15,6 +15,7 @@ from pzops.ini import Ini
 from pzops.util import FileLock, PZError, file_hash, identifier, now, read_json, write_json
 from pzops import rcon
 from pzops.redact import pump
+from pzops.logs import startup_issue
 
 APP = Path("/pz/app")
 DATA = Path("/pz/data")
@@ -125,6 +126,7 @@ class Agent:
                 "pid": pid, "generation": self.generation, "agent": self.identity,
                 "udp": self.udp(pid) if pid else [], "rss_bytes": rss, "uptime_seconds": uptime,
                 "cgroup_memory_bytes": cgroup_memory,
+                'startup_issue': startup_issue(LOGS / 'game-console.log', self.log_offset) if self.child and self.child.poll() is not None else None,
                 **self.installed()}
 
     def install(self, job):

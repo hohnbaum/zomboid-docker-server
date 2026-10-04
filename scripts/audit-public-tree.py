@@ -16,7 +16,7 @@ def inspect_blob(name, data):
     reasons = []
     if any(x.lower() in FORBIDDEN for x in p.parts):
         reasons.append("private-runtime-path")
-    if p.name.startswith(".env") and p.name != ".env.example":
+    if p.name.startswith(".env") and p.name not in {'.env.example', '.env.test.example', '.env.live.example', '.env.versioncheck.example'}:
         reasons.append("real-env")
     if p.suffix.lower() in {".db", ".sqlite", ".sqlite3", ".token", ".secret", ".key", ".pem", ".zip", ".gz", ".tar"}:
         reasons.append("private-or-binary-file")

@@ -104,6 +104,8 @@ class Operations:
         udp = {str(port): port in proc.get("udp", []) for port in ports}
         if proc.get("running") and not all(udp.values()):
             reasons.append("UDP_MISSING_OR_NOT_OWNED")
+        if proc.get('startup_issue'):
+            reasons.append(proc['startup_issue'])
         ready = bool(proc.get("running") and all(udp.values()) and rcon_ok and known)
         desired = self.intent()
         maintenance = self.maintenance()
@@ -127,6 +129,7 @@ class Operations:
                   "player_names": names,
                   "rcon": rcon_ok, "udp": udp, "pending": self.layout.pending.exists(), "pending_valid": pending_valid, "recovery_required": recovery,
                   "generation": proc.get("generation"), "agent": proc.get("agent"), "version": proc.get("version"), "build": proc.get("build"),
+                  'startup_issue': proc.get('startup_issue'),
                   "uptime_seconds": proc.get("uptime_seconds"), "rss_bytes": proc.get("rss_bytes"),
                   "backup": latest["name"] if latest else None, "backup_age_hours": age, "detail": reasons, "sample_time": now(),
                   "filesystem_free_bytes": shutil.disk_usage(self.layout.data).free}
@@ -200,6 +203,8 @@ class Operations:
             if state["ready"]:
                 return state
             if not state["launching"] or (seen and not state["running"]):
+                if state.get('startup_issue') == 'WORKSHOP_DOWNLOAD_FAILED':
+                    raise PZError('START_WORKSHOP_DOWNLOAD_FAILED')
                 raise PZError("START_PROCESS_EXITED")
             self.sleep(2)
         raise PZError("READINESS_TIMEOUT")

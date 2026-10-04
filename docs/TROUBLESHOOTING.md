@@ -1,5 +1,34 @@
 # Troubleshooting and recovery
 
+## Aktuelle Abnahmebeobachtungen
+
+Die private Importkopie hat READY und menschliche Client-Abnahme bestanden.
+Der ältere Ressourcenblocker ist kein aktueller Abnahmestand; weiter ausreichend
+RAM für Heap, native JVM und Host messen. Der finale Spielstand kommt später
+frisch vom nach letztem Spielbetrieb gestoppten Windows-Server.
+
+- Connection Failed nach Steam-Handshake: native 1:1-UDP 16261/16262 prüfen.
+  Der frühere Hostversatz 17261/17262 scheiterte beobachtet. Nur ein Projekt pro
+  Host-IP betreiben; Spiel UND Controlcontainer stoppen, um Ports freizugeben.
+- Character-Creation-Screen beim Wechsel von pztest zu szs: einmal beobachtet;
+  vollständiger Client-Neustart lud den vorhandenen Charakter. Keine bewiesene
+  interne Ursache und kein Anlass, Daten zu löschen oder zurückzusetzen.
+- START_PROCESS_EXITED oder START_WORKSHOP_DOWNLOAD_FAILED: aktuellen Job,
+  workshop-status und privates Game-Log prüfen. Current/Update/Missing/Unknown
+  sind dynamisch. Ein upstream aktualisiertes Item schlug einmal im Download
+  fehl, war später Current und der Start gelang. Kein automatisches Löschen
+  eines Mods oder Ändern der Welt aufgrund eines Einzelfehlers.
+- Windows logs: .\pz.ps1 --env-file PROFIL logs benutzt jetzt python -m pzops.logs.
+  Der frühere SyntaxError durch Python--c-/Newline-Quoting ist regressiongeprüft.
+  Linux verwendet dasselbe Modul; der POSIX-Wrapper ist nativ argumentgeprüft.
+- ARCHIVE_CHECKSUM_MISMATCH/INVALID: unverändertes Archiv und passenden angrenzenden
+  SHA-Sidecar erneut übertragen. TARGET_NOT_EMPTY: neues Importziel wählen.
+- IMPORT_COPY_MISMATCH/RESTORE_PUBLICATION_MISMATCH: Ziel offline lassen.
+  Keine Fertigmarker/Restorejournale umgehen; Originalarchiv in neues Ziel übernehmen.
+
+Die gesonderte hash-/DB-verifizierte private Restore-Kopie bekommt bewusst keinen
+weiteren menschlichen Test; diese Restgrenze ist kein Migrationsblocker.
+
 Read `pz status`, `pz health`, `pz jobs` and `pz job JOB_ID`. Error responses use
 fixed codes. Raw game/Steam logs remain private in the logs volume; `pz logs`
 shows recent game diagnostics in your local terminal. Review before sharing.

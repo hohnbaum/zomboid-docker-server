@@ -17,10 +17,12 @@ def main(argv=None):
     sub.add_parser("import")
     p = sub.add_parser("import-archive")
     p.add_argument("--archive", required=True)
+    p.add_argument('--sha256-file')
     p = sub.add_parser("backup")
     p.add_argument("--type", default="manual")
     p = sub.add_parser("restore")
     p.add_argument("--archive", required=True)
+    p.add_argument('--sha256-file')
     p.add_argument("--confirm-replace", action="store_true")
     p = sub.add_parser("export")
     p.add_argument("--backup", required=True)
@@ -42,14 +44,21 @@ def main(argv=None):
             elif args.action == "import":
                 result = migration.import_instance(layout, Path("/source"))
             elif args.action == "import-archive":
-                result = migration.import_archive(layout, confined("/source", args.archive))
+                archive = confined('/source', args.archive)
+                checksum = backups.verify_archive_checksum(archive, confined('/source', args.sha256_file) if args.sha256_file else None)
+                result = migration.import_archive(layout, archive)
+                if backups.verify_archive_checksum(archive) != checksum:
+                    raise PZError('ARCHIVE_CHANGED_DURING_IMPORT')
             elif args.action == "backup":
                 result = backups.create(layout, args.type, _locked=True)
             elif args.action == "restore":
                 archive = confined("/source", args.archive)
+                checksum = backups.verify_archive_checksum(archive, confined('/source', args.sha256_file) if args.sha256_file else None)
                 stage = layout.backups / (".archive-" + uuid.uuid4().hex)
                 backups.extract_archive(archive, stage)
                 try:
+                    if backups.verify_archive_checksum(archive) != checksum:
+                        raise PZError('ARCHIVE_CHANGED_DURING_IMPORT')
                     result = backups.restore(layout, stage, args.confirm_replace, desired=desired, _locked=True)
                 finally:
                     import shutil
