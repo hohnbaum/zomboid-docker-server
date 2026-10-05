@@ -82,8 +82,10 @@ private deployment settings; no container-IP or host discovery is shown to playe
 ## Installation and health
 
 Installation explicitly runs Linux SteamCMD with force_install_dir, anonymous
-login, app_info_update, app_update 380870 and quit. Container restart never invokes
-app_update. Installed files persist in the app volume. start-server.sh loads
+login, app_info_update, app_update 380870 and quit. Container entrypoints start
+management services; SteamCMD runs through install/update jobs. Due hourly
+maintenance may enqueue an update after a reboot when intent and safety checks
+allow it. Installed files persist in the app volume. start-server.sh loads
 ProjectZomboid64.json; the agent sets Xms/Xmx in that file and passes server name
 and Linux cachedir to the launcher. It uses the packaged Java runtime.
 
@@ -111,7 +113,8 @@ flag. Existing degraded children are never automatically restarted.
 
 ## Lifecycle and scheduling
 
-Save/quit refuses unknown players. Known occupied state requires explicit force,
+Graceful stop/restart/backup refuses unknown players. A standalone save sends an
+authenticated RCON save command. Known occupied state requires explicit force,
 which never permits killing Java. Ops waits up to 60 seconds for graceful exit;
 Docker grants 90 seconds to the server container. Agent SIGTERM attempts save/quit.
 An outer Docker timeout is not recorded as a verified clean shutdown.

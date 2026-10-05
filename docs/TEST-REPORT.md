@@ -1,6 +1,6 @@
 # Abnahme und Testbericht
 
-Stand: **4. Oktober 2026**. Dieser Bericht trennt selbst ausgeführte synthetische/
+Stand: **5. Oktober 2026**. Dieser Bericht trennt selbst ausgeführte synthetische/
 Runtime-Prüfungen von der inzwischen vom Betreiber bestätigten menschlichen
 Abnahme. Private Identitäten, Charakter-Hashes, Koordinaten, Zugangsdaten und
 Deploymentadressen bleiben außerhalb des öffentlichen Repositorys.
@@ -38,6 +38,14 @@ nach dem letzten Spielbetrieb aus dessen kontrolliert gestopptem aktuellen Besta
 erstellt werden. Wird nach einem Export erneut gespielt, ist dieser nur historisch.
 
 ## Aktuelle automatisierte Prüfungen
+
+Am 5. Oktober wurden die README-Befehle zusätzlich über echtes Debian-SSH und
+einen eigenen Docker-Daemon mit neuen synthetischen Welten ausgeführt, einschließlich
+6g-Live-/Restore-Starts, Instanzwechsel, Management, Export/Restore und Wiederanlauf.
+Umgebung, Befehlsmatrix und Grenzen: [README-Prüfung](README-CHECK.md).
+Nach der leichteren authentifizierten Control-Healthcheck-Abfrage bestand die Suite
+erneut: Linux 115 Tests mit 1 Skip, Windows 115 Tests mit 6 Skips. Der API-Test prüft
+jetzt auch den Healthcheck-Client mit gültigem und falschem Token.
 
 Am 4. Oktober auf dem finalisierten Code ausgeführt:
 
@@ -91,11 +99,12 @@ keine privaten Live-Volumes. Die vorhandene private Welt wurde nicht erneut gest
 | Wrapper-Archivrestore in weiteres neues Ziel | Manifest-/Hash-/SQLite-Prüfung erfolgreich, desired=false, kein Spielstart |
 | Roher Persistence-File-Drop in neues Ziel | Linux-Inventar und geschütztes pristine Backup erfolgreich |
 
-Der Linux-POSIX-Wrapper wurde nativ mit einem kontrollierten Transportstub geprüft;
-das echte Logmodul zusätzlich im Linux-Ops-Container. Ein vollständiger ./pz logs-
-Aufruf von einem gewöhnlichen Linux-Docker-Host wurde hier nicht ausgeführt: die
-Testumgebung ist Windows mit Docker Desktop, kein eingerichteter Debian-SSH-Host.
+Am 4. Oktober wurde der Linux-POSIX-Wrapper nativ mit einem kontrollierten
+Transportstub geprüft, das echte Logmodul zusätzlich im Linux-Ops-Container.
 Der Windows-Aufruf verwendete die reale Docker-CLI und das reale Ops-Logmodul.
+Am 5. Oktober wurde diese Transportgrenze geschlossen: ./pz logs lief über echtes
+SSH auf einer getrennten Debian-13-VM mit deren eigener Docker-CLI und eigenem
+Docker-Daemon erfolgreich. Die VM benutzt keine privaten bisherigen Weltdaten.
 
 ## Weiterhin gültige Runtime-Evidenz vom 2. Oktober
 
@@ -147,7 +156,7 @@ Dateien wurden vor und nach der Finalisierung per privatem Fingerprintvergleich
 geprüft: 44 erfasste Dateien unverändert. Fingerprints bleiben außerhalb von Git.
 Die neuen Testziele bleiben gestoppt; ihre Daten werden nicht veröffentlicht.
 
-Offen bleiben tatsächliche Debian-Installation, frischer Windows-Cutover mit
+Offen bleiben Einrichtung des tatsächlichen Zielhosts, frischer Windows-Cutover mit
 Client-Check des **neuen finalen Spielstands**, optional echte Discord-Anmeldung/
 Rollen-/Nullspieler-Restart und späterer GitHub-Push. Physischer Stromausfall und
 echter Betrieb mit belegten Spielern wurden nicht erzwungen; dafür existieren

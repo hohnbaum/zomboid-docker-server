@@ -499,6 +499,15 @@ class ApiTests(Fixture):
                 urllib.request.urlopen(url + '/status')
             self.assertEqual(denied.exception.code, 401)
             headers = {'Authorization': 'Bearer unit-test-placeholder', 'Content-Type': 'application/json'}
+            # Healthchecks use the authenticated API client without loading the CLI.
+            from pzops.api_client import Client
+            token = self.layout.state / 'api.token'
+            token.write_text('unit-test-placeholder')
+            client = Client(url=url, token_file=token)
+            self.assertIs(client.request('ping').get('ok'), True)
+            token.write_text('FAKE')
+            rejected = Client(url=url, token_file=token)
+            self.error('UNAUTHORIZED', rejected.request, 'ping')
             with self.assertRaises(urllib.error.HTTPError):
                 urllib.request.urlopen(urllib.request.Request(url + '/shell', headers=headers))
             req = urllib.request.Request(url + '/jobs', data=json.dumps({'action': 'save'}).encode(), headers=headers)

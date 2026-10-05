@@ -13,6 +13,18 @@ lebender Charakter, Welt und repräsentative Mods funktionierten; danach waren
 ein Migrationsnachweis, **nicht der finale Produktionsspielstand**. Dieser kommt
 nach dem letzten Spielbetrieb frisch vom kontrolliert gestoppten Windows-Server.
 
+Die Debian-Befehle sind für **Bash**. In jeder neuen SSH-/sudo-Shell zuerst
+ausführen, damit abhängige Schritte nach einem Fehler stehen bleiben:
+
+```bash
+set -e
+```
+
+Bei einem Fehler endet die Bash-Sitzung; gegebenenfalls neu per SSH anmelden.
+Nach der Fehlerklärung ab dem fehlgeschlagenen Befehl fortsetzen. Bereits erledigte
+Initialisierung und Import dabei nicht wiederholen. Abschnitt 9 enthält einzelne
+Bedienbeispiele, die jeweils bewusst ausgewählt werden.
+
 ## 1. Voraussetzungen
 
 - Debian 13 (Trixie), **amd64/x86-64**, SSH-Zugang und sudo bzw. root.
@@ -27,7 +39,6 @@ nach dem letzten Spielbetrieb frisch vom kontrolliert gestoppten Windows-Server.
 
 ```bash
 uname -m
-free -h
 df -h
 ```
 
@@ -38,10 +49,18 @@ Desktop, WSL oder PowerShell ist für diesen Debian-Quickstart erforderlich.
 
 Auf einem frischen Debian-Server:
 
+Die Befehle verwenden sudo. Bei direkter Root-Anmeldung und fehlendem sudo zuerst
+als root einmal ausführen:
+
+```bash
+apt-get update
+apt-get install sudo
+```
+
 ```bash
 sudo apt-get update
 sudo apt-get upgrade
-sudo apt-get install ca-certificates curl git python3 iptables
+sudo apt-get install ca-certificates curl git python3 iptables procps iproute2 nano
 sudo install --directory --mode=0755 /etc/apt/keyrings
 sudo curl --fail --silent --show-error --location \
   https://download.docker.com/linux/debian/gpg \
@@ -59,6 +78,7 @@ sudo apt-get update
 sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo systemctl enable --now docker.service containerd.service
 sudo docker run --rm hello-world
+free -h
 ```
 
 Bei einem bereits eingerichteten Host zuerst die bestehenden Pakete und Dienste
@@ -91,6 +111,7 @@ git clone "$PZ_REPOSITORY_URL" pz-docker-server
 cd pz-docker-server
 cp .env.test.example .env.test
 cp .env.live.example .env.live
+chmod 600 .env.test .env.live
 ./pz --env-file .env.test init-secrets
 ./pz --env-file .env.live init-secrets
 sudo chown 1000:1000 secrets/test/api.token secrets/test/discord.token \
@@ -125,7 +146,7 @@ sudo ss -lunp | grep -E ':(16261|16262)\b' || true
 docker ps --format 'table {{.Names}}\t{{.Ports}}'
 docker compose --env-file .env.test build pz-server pz-ops
 ./pz --env-file .env.test init-empty
-docker compose --env-file .env.test up -d pz-server pz-ops
+docker compose --env-file .env.test up -d --wait --wait-timeout 120 pz-server pz-ops
 ./pz --env-file .env.test install
 ./pz --env-file .env.test start
 ./pz --env-file .env.test status
@@ -141,6 +162,12 @@ erzeugt und bleiben privat; der interne API-Token ebenfalls. `init-empty` ersetz
 keine bestehende Welt. `start` wartet auf READY: eigener Spielprozess, beide
 UDP-Listener und authentifiziertes RCON mit lesbarer Spielerzahl.
 
+`up --wait` wartet auf die gesunden Control-Dienste, bevor `install` bzw. `start`
+deren API verwenden. Bei einem Fehler **nicht die nächsten Zeilen weiter ausführen**:
+zuerst Ursache und Compose-Status prüfen. `init-empty` und der spätere Live-Import
+sind einmalige Initialisierungen; für vorhandene Instanzen nur up/start verwenden.
+
+Vor dem externen Client-Test Firewall/NAT gemäß Abschnitt 5 einrichten.
 Im PZ-Client den Debian-Host und Port **16261** verwenden, das Serverpasswortfeld
 leer lassen und einen normalen Spieleraccount benutzen. Der Bootstrap-Admin ist
 kein allgemeines Spielerpasswort. Server und Client müssen kompatible PZ-Versionen
@@ -161,7 +188,7 @@ einordnen, beispielsweise vor einer vorhandenen Drop-Regel:
 
 ```bash
 sudo iptables -S DOCKER-USER
-sudo iptables -C DOCKER-USER -p udp -m multiport --dports 16261,16262 -j ACCEPT || \
+sudo iptables -C DOCKER-USER -p udp -m multiport --dports 16261,16262 -j ACCEPT 2>/dev/null || \
   sudo iptables -I DOCKER-USER 1 -p udp -m multiport --dports 16261,16262 -j ACCEPT
 ```
 
@@ -170,6 +197,35 @@ dauerhaft hinterlegen und nach einem Reboot prüfen. Vorhandene Regeln nicht pau
 löschen. Andere Firewall-Backends erfordern deren passende Forwarding-Regeln.
 Siehe [Docker mit iptables](https://docs.docker.com/engine/network/firewall-iptables/)
 und [Docker/Host-Firewalls](https://docs.docker.com/engine/network/packet-filtering-firewalls/).
+
+Auf einem frischen Zielhost ohne eigene Firewallverwaltung kann diese systemd-Unit
+die Regel bei Docker-Start/-Neustart erneut setzen. Sie setzt das standardmäßige
+iptables-Backend voraus; bei vorhandener Firewallverwaltung die Regel stattdessen
+dort pflegen:
+
+```bash
+sudo tee /etc/systemd/system/pz-docker-udp.service >/dev/null <<'EOF'
+[Unit]
+Description=Project Zomboid UDP in Docker forwarding
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '/usr/sbin/iptables -C DOCKER-USER -p udp -m multiport --dports 16261,16262 -j ACCEPT || /usr/sbin/iptables -I DOCKER-USER 1 -p udp -m multiport --dports 16261,16262 -j ACCEPT'
+
+[Install]
+WantedBy=docker.service
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now pz-docker-udp.service
+sudo systemctl status pz-docker-udp.service --no-pager
+```
+
+Nach einem Host-Reboot `sudo iptables -S DOCKER-USER` sowie Docker-/PZ-Status erneut
+prüfen. Die Unit öffnet keine zusätzlichen Ports.
 
 ## 6. Test sauber stoppen und Live-Version vorbereiten
 
@@ -190,11 +246,12 @@ einer temporären leeren Instanz auf genau dem Live-App-Volume erzeugt:
 
 ```bash
 cp .env.versioncheck.example .env.versioncheck
+chmod 600 .env.versioncheck
 ./pz --env-file .env.versioncheck init-secrets
 sudo chown 1000:1000 secrets/versioncheck/api.token secrets/versioncheck/discord.token
 docker compose --env-file .env.versioncheck build pz-server pz-ops
 ./pz --env-file .env.versioncheck init-empty
-docker compose --env-file .env.versioncheck up -d pz-server pz-ops
+docker compose --env-file .env.versioncheck up -d --wait --wait-timeout 120 pz-server pz-ops
 ./pz --env-file .env.versioncheck install
 ./pz --env-file .env.versioncheck start
 ./pz --env-file .env.versioncheck version
@@ -238,13 +295,13 @@ fertigen Importmarkierung geprüft. Ungültige oder unvollständige Daten verwei
 den Import. Aktives altes Windows-Pending vor dem Export kontrolliert abschließen;
 nicht blind einen v1-Ops-Record in portable State-Dateien kopieren.
 
-Ein SHA-256-Sidecar `szs-final.tar.gz.sha256` enthält entweder den Hash allein oder
-`HASH  szs-final.tar.gz`. Archiv und Sidecar separat von Git übertragen, z.B.:
+Ein SHA-256-Sidecar `szs-final.tar.gz.sha256` enthält als einzelne ASCII-/UTF-8-
+Textzeile entweder den Hash allein oder `HASH  szs-final.tar.gz` (kein UTF-16).
+Archiv und Sidecar separat von Git übertragen, z.B.:
 
 ```bash
 # Auf dem Rechner mit dem privaten Archiv; Platzhalter ersetzen.
-scp szs-final.tar.gz szs-final.tar.gz.sha256 \
-  BENUTZER@SERVER:~/pz-docker-server/imports/
+scp szs-final.tar.gz szs-final.tar.gz.sha256 BENUTZER@SERVER:~/pz-docker-server/imports/
 ```
 
 Auf Debian, aus dem Repositoryverzeichnis:
@@ -255,7 +312,7 @@ sudo chgrp 1000 imports/szs-final.tar.gz imports/szs-final.tar.gz.sha256
 docker compose --env-file .env.live build pz-server pz-ops
 ./pz --env-file .env.live import --archive imports/szs-final.tar.gz \
   --sha256-file imports/szs-final.tar.gz.sha256
-docker compose --env-file .env.live up -d pz-server pz-ops
+docker compose --env-file .env.live up -d --wait --wait-timeout 120 pz-server pz-ops
 ./pz --env-file .env.live status
 ./pz --env-file .env.live version
 ./pz --env-file .env.live config-state
@@ -283,12 +340,12 @@ Normal läuft nur Live. Für einen Test nach Abmeldung aller Spieler:
 ./pz --env-file .env.live save
 ./pz --env-file .env.live stop
 docker compose --env-file .env.live stop pz-ops pz-server
-docker compose --env-file .env.test up -d pz-server pz-ops
+docker compose --env-file .env.test up -d --wait --wait-timeout 120 pz-server pz-ops
 ./pz --env-file .env.test start
 # Test durchführen, dann alle Testspieler abmelden.
 ./pz --env-file .env.test stop
 docker compose --env-file .env.test stop pz-ops pz-server
-docker compose --env-file .env.live up -d pz-server pz-ops
+docker compose --env-file .env.live up -d --wait --wait-timeout 120 pz-server pz-ops
 ./pz --env-file .env.live start
 ```
 
@@ -301,6 +358,11 @@ Der frühere Versatz 17261/17262 auf interne 16261/16262 führte beobachtet zu
 Connection Failed nach beginnendem Steam-Handshake. 1:1 ist der unterstützte Pfad.
 
 ## 9. Verwaltung und Wiederanlauf
+
+Die folgenden Befehle sind **einzelne Bedienbeispiele**, kein gemeinsam auszuführendes
+Script. JOB_ID und imports/private-plan.json durch tatsächlich vorhandene Werte ersetzen.
+Mod-Pläne vorher nach dem [Planformat](docs/MOD-PLAN-LIFECYCLE.md) erstellen und
+prüfen; --apply nur für den bewusst freigegebenen Plan verwenden.
 
 ```bash
 ./pz --env-file .env.live status
@@ -315,8 +377,8 @@ Connection Failed nach beginnendem Steam-Handshake. 1:1 ist der unterstützte Pf
 ./pz --env-file .env.live workshop-status
 ./pz --env-file .env.live workshop-update
 ./pz --env-file .env.live config-state
-./pz --env-file .env.live apply-mod-plan private-plan.json
-./pz --env-file .env.live apply-mod-plan private-plan.json --apply
+./pz --env-file .env.live apply-mod-plan imports/private-plan.json
+./pz --env-file .env.live apply-mod-plan imports/private-plan.json --apply
 ./pz --env-file .env.live maintenance on --reason 'Geplante Arbeit'
 ./pz --env-file .env.live maintenance off
 ./pz --env-file .env.live jobs
@@ -328,9 +390,16 @@ Eingriff. `--force` erlaubt nur einen bewussten Save/Quit bei bekannter Belegung
 keinen Kill und keinen unbekannten Zustand. Logs nur privat prüfen: sie können
 Spieler-/Chatdaten enthalten, auch wenn bekannte Zugangsdaten gefiltert werden.
 
+`maintenance on` unterdrückt automatische Aufgaben; ein laufender Spielprozess
+wird dadurch nicht gestoppt. Für Arbeiten an einer ruhenden Welt zusätzlich stop
+ausführen. Lesen, save/stop, Planarbeit, config-commit, export und recover bleiben
+verfügbar. Vor start/restart/install/update/backup/workshop-update/Online-Restore
+zuerst `maintenance off` ausführen; diese Jobs melden sonst OPERATOR_MAINTENANCE.
+
 Ein Backup umfasst Server/Saves/db/Lua/options und kohärente Mod-/Config-Provenienz.
-Ein laufender Backupjob stoppt und startet frisch; ein absichtlich gestoppter Server
-bleibt gestoppt. Vier neueste plus bis zu vier ältere Wochenanker werden behalten;
+Ein Backup bei laufendem Spiel speichert, stoppt und startet anschließend frisch;
+ein absichtlich gestoppter Server bleibt gestoppt. Vier neueste plus bis zu vier
+ältere Wochenanker werden behalten;
 geschützte pristine-/Referenz-Backups werden nicht rotiert. Alle Backup-Alterswerte
 verwenden denselben abgeschlossenen Katalog.
 
@@ -341,7 +410,9 @@ Workshop-Update allein erzwingt keinen automatischen Neustart. Jobs laufen unabh
 von SSH-/CLI-/Discord-Verbindungen weiter; `--detach` gibt nur die Job-ID zurück.
 
 **Intent:** `start` setzt desired=true; `stop` setzt dauerhaft desired=false.
-Container-Neustart/Reboot installiert oder aktualisiert PZ nicht automatisch.
+Containerstarts starten die Verwaltungsdienste. Steam-Installationen laufen über
+install/update oder einen fälligen Wartungsjob, nicht direkt aus dem Container-Entrypoint.
+Nach einem Reboot laufen Reconciliation und fällige Wartung wieder an.
 Wenn Docker und beide Control-Dienste wieder laufen, startet die Reconciliation
 einen fehlenden gewünschten Spielprozess bei freier Wartung/Recovery erneut.
 Sie prüft beim Booten und ungefähr alle fünf Minuten; Startreihenfolge kann den
@@ -350,7 +421,18 @@ Manuell gestoppte Testcontainer bleiben mit unless-stopped gestoppt. Deshalb
 vor Reboot/Wechsel alle unbenutzten Projekte sauber stoppen und Ports freihalten.
 Unterbrochene Jobs setzen false Intent/Recovery und werden nicht blind wiederholt.
 
+Zusätzlich prüft die stündliche Wartung ungefähr alle sechs Stunden den Steam-Build
+und nach 24 Stunden ohne reguläres Backup dessen Fälligkeit. Bei true Intent und
+ohne Wartung/Recovery kann sie ein Update bzw. Backup einreihen; Änderungen erfordern
+bekannte null Spieler. Bei Importdaten bleibt auch nach einem Update der 42.21.0-
+Gate bestehen. Ein anderer installierter Build kann daher den Wiederstart blockieren;
+vor einem geplanten Versionswechsel Kompatibilität und Wiederherstellung vorbereiten.
+
 ## 10. Export, Restore und Rollback
+
+Diese Abläufe bei einem geplanten Handoff oder einer Wiederherstellung ausführen.
+Vor dem normalen Weiterbetrieb alle hierfür verwendeten temporären Projekte
+kontrolliert stoppen und die gewünschte Instanz bewusst wieder aktivieren.
 
 Ein aktuelles privates Linux-Backup kann mit den vorhandenen Tools exportiert werden:
 
@@ -360,26 +442,67 @@ Ein aktuelles privates Linux-Backup kann mit den vorhandenen Tools exportiert we
 # Zurückgegebenen Backupnamen einsetzen.
 docker compose --env-file .env.live stop pz-ops pz-server
 ./pz --env-file .env.live export --backup BACKUP_NAME --output exports/private-handoff.tar.gz
+sudo chown "$(id -u):1000" exports/private-handoff.tar.gz exports/private-handoff.tar.gz.sha256
+sudo chmod 640 exports/private-handoff.tar.gz exports/private-handoff.tar.gz.sha256
 ```
 
 Der Export liefert tar.gz und externen .sha256-Sidecar; interne Manifest-/Metadata-
 Dateien bleiben im Archiv. Git allein kann eine private Welt nicht wiederherstellen.
+Tools schreiben den Export zunächst privat als UID 1000; chown/chmod machen ihn
+für den SSH-Betreiber lesbar und erhalten die Import-Leserechte für GID 1000.
 
 Restore bevorzugt ein **neues** Projekt mit passenden Servernamen, eigener
-Konfiguration und Secrets; z.B. .env.restore aus .env.live mit geändertem
-COMPOSE_PROJECT_NAME und PZ_SECRETS_DIR vorbereiten, dann:
+Konfiguration und Secrets. Für das gerade auf diesem Host exportierte Archiv:
 
 ```bash
+cp .env.live .env.restore
+chmod 600 .env.restore
+sed -i 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=pzrestore/' .env.restore
+sed -i 's|^PZ_SECRETS_DIR=.*|PZ_SECRETS_DIR=./secrets/restore|' .env.restore
 ./pz --env-file .env.restore init-secrets
-# Neue Secrets wie oben für UID/GID 1000 vorbereiten; Images bauen.
+sudo chown 1000:1000 secrets/restore/api.token secrets/restore/discord.token
 docker compose --env-file .env.restore build pz-server pz-ops
-./pz --env-file .env.restore restore --archive imports/private-handoff.tar.gz \
-  --sha256-file imports/private-handoff.tar.gz.sha256
+./pz --env-file .env.restore restore --archive exports/private-handoff.tar.gz \
+  --sha256-file exports/private-handoff.tar.gz.sha256
 ```
 
 Restore validiert Archive und kopiertes Staging, startet nie selbst und setzt
-desired=false. Vor explizitem Start Live stoppen und kompatible App-Version
-bereitstellen. Online-Restore eines lokalen Backups: `restore --backup BACKUP_NAME`,
+desired=false. Das Restoreprojekt darf nicht parallel zu Live/Test auf denselben
+Ports laufen. Bei ausdrücklich gesetzten App-/Workshop-Overrides in .env.live
+diese nicht ungeprüft in das Restoreprofil übernehmen; das folgende Beispiel setzt
+die normalen getrennten Projektvolumes voraus.
+Ein von einem anderen Host hochgeladenes Archiv stattdessen unter imports/ verwenden
+und wie in Abschnitt 7 lesbar vorbereiten. Zielprojekt/-Secretpfad müssen neu sein.
+
+Vor dem ersten Restore-Start müssen Live und Test samt Controls gestoppt sein.
+Für ein importiertes Backup die eigene leere Versionsprüfung auf dem neuen
+pzrestore_app/pzrestore_workshop ausführen:
+
+```bash
+cp .env.versioncheck.example .env.restorecheck
+sed -i 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=pzrestore-versioncheck/;s|^PZ_SECRETS_DIR=.*|PZ_SECRETS_DIR=./secrets/restorecheck|;s/pzlive_app/pzrestore_app/;s/pzlive_workshop/pzrestore_workshop/' .env.restorecheck
+chmod 600 .env.restorecheck
+./pz --env-file .env.restorecheck init-secrets
+sudo chown 1000:1000 secrets/restorecheck/api.token secrets/restorecheck/discord.token
+docker compose --env-file .env.restorecheck build pz-server pz-ops
+./pz --env-file .env.restorecheck init-empty
+docker compose --env-file .env.restorecheck up -d --wait --wait-timeout 120 pz-server pz-ops
+./pz --env-file .env.restorecheck install
+./pz --env-file .env.restorecheck start
+./pz --env-file .env.restorecheck version
+./pz --env-file .env.restorecheck stop
+docker compose --env-file .env.restorecheck stop pz-ops pz-server
+```
+
+Nur bei bestätigter **42.21.0** anschließend die wiederhergestellte Welt starten:
+
+```bash
+docker compose --env-file .env.restore up -d --wait --wait-timeout 120 pz-server pz-ops
+./pz --env-file .env.restore start
+./pz --env-file .env.restore health
+```
+
+Online-Restore eines lokalen Backups: `restore --backup BACKUP_NAME`,
 ebenfalls bei gestopptem Spiel/false Intent. Vorhandene Daten ersetzen erfordert
 ausdrücklich `--confirm-replace` und erzeugt ein geschütztes Pre-Restore-Backup.
 
@@ -393,10 +516,15 @@ Persistente Volumes nicht als normalen Wartungsschritt löschen.
 
 ## 11. Optional Discord
 
+Voraussetzung: Live ist wie in Abschnitt 7 aktiviert, seine Control-Dienste sind
+gesund und Test-/Versionsprüf-/Restoreprojekte sind gestoppt. Den Bot immer mit
+dem Profil der tatsächlich betriebenen Instanz verwenden.
+
 PZ_DISCORD_GUILD_ID und PZ_DISCORD_RESTART_ROLE nur in der privaten .env.live setzen.
 Den Bot-Token in secrets/live/discord.token schreiben und 0600/UID 1000 sicherstellen:
 
 ```bash
+sudo nano secrets/live/discord.token
 sudo chown 1000:1000 secrets/live/discord.token
 sudo chmod 0600 secrets/live/discord.token
 docker compose --env-file .env.live --profile discord build pz-discord
@@ -426,6 +554,11 @@ stoppen. Live-Discord wurde ohne bereitgestellte Credentials nicht abgenommen.
   diagnostizieren. READINESS_TIMEOUT beendet ihn nicht automatisch.
 - **BLOCKED_VERSION / APP_INSTALL_INCOMPLETE:** kompatiblen Build bzw. erfolgreiche
   explizite Installation herstellen; Gates nicht durch Markeränderungen umgehen.
+- **STEAM_INSTALL_FAILED:** den Job und dessen privates Steam-Installationslog
+  prüfen. Im Debian-Prüflauf scheiterte der erste Download mit SteamCMD
+  „Missing configuration“; der erneute `install`-Aufruf installierte erfolgreich.
+  Den fehlgeschlagenen Installationsbefehl mit demselben --env-file wiederholen.
+  Dabei weder `init-empty` wiederholen noch Volumes löschen.
 - **TARGET_NOT_EMPTY:** frisches Projekt wählen, keine privaten Daten entfernen.
 - **Recovery:** `jobs`, Jobphase und private Journale prüfen. `recover` ist explizit;
   bei ambiger Apply-/Ack-Provenienz oder unterbrochener Restore-Publikation das
@@ -435,10 +568,12 @@ stoppen. Live-Discord wurde ohne bereitgestellte Credentials nicht abgenommen.
 
 Der separate menschliche Client-Test der hash-/DB-seitig verifizierten Restore-
 Kopie wird bewusst nicht wiederholt. Diese Restgrenze ist **kein Migrationsblocker**.
-Debian-13-Neuinstallation und finaler aktueller Windows-Cutover erfolgen auf dem
-Zielhost; hier wird keine private Welt erneut gestartet oder produktiv exportiert.
+Die Debian-13-Installation und die README-Befehle wurden mit neu erzeugten Testdaten
+in isolierten Debian-Prüfumgebungen ausgeführt. Einrichtung des tatsächlichen Zielhosts
+und finaler aktueller Windows-Cutover bleiben erforderlich; hier wird keine private
+Welt erneut gestartet oder produktiv exportiert.
 
-Details: [Abnahme und Tests](docs/TEST-REPORT.md), [Linux/Cutover-Handoff](docs/LINUX-HANDOFF.md),
+Details: [README-Befehlsprüfung](docs/README-CHECK.md), [Abnahme und Tests](docs/TEST-REPORT.md), [Linux/Cutover-Handoff](docs/LINUX-HANDOFF.md),
 [Datenvertrag](docs/DATA-MIGRATION.md), [Architektur](docs/ARCHITECTURE.md),
 [Mod-Lifecycle](docs/MOD-PLAN-LIFECYCLE.md), [Recovery](docs/TROUBLESHOOTING.md).
 Vor einem späteren Push Tests und `python3 scripts/audit-public-tree.py --history`

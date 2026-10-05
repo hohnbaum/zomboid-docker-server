@@ -17,15 +17,15 @@ Die vollständigen Bash-Befehle stehen im [deutschen README](../README.md):
    Docker-Debian-Repository, Git und Python einrichten.
 2. Code klonen, .env.test/.env.live kopieren, getrennte Secrets erzeugen und
    UID/GID 1000-Leserechte sowie Import-/Exportrechte vorbereiten.
-3. Leeren pztest installieren, READY/Health/Version prüfen, Client auf UDP 16261
+3. Host-/Provider-Firewall für UDP 16261/16262 vorbereiten. Docker-DNAT und
+   DOCKER-USER berücksichtigen; nur UFW INPUT zu konfigurieren genügt nicht.
+4. Leeren pztest installieren, READY/Health/Version prüfen, Client auf UDP 16261
    testen; Serverpasswort ist leer. RCON/Admin/API bleiben private Secrets.
-4. Test kontrolliert stoppen **und seine Controlcontainer stoppen**, Volumes behalten.
-5. Das unabhängige Live-App-Volume einmal mit der leeren temporären Versionsprüfung
+5. Test kontrolliert stoppen **und seine Controlcontainer stoppen**, Volumes behalten.
+6. Das unabhängige Live-App-Volume einmal mit der leeren temporären Versionsprüfung
    aus .env.versioncheck.example installieren/starten. Exakt 42.21.0 bestätigen,
    dann Spiel und Controls stoppen. Nur dieser temporäre Prüflauf teilt das
    Live-App-/Workshopvolume; seine leere Datenwelt ist eigenständig.
-6. Host-/Provider-Firewall für UDP 16261/16262 vorbereiten. Docker-DNAT und
-   DOCKER-USER berücksichtigen; nur UFW INPUT zu konfigurieren genügt nicht.
 
 Live und dauerhafter Test haben getrennte **App-, Workshop-, Daten-, State-,
 Control-, Backup- und Logvolumes sowie Secretdateien**. Kein neuer Host benötigt
@@ -75,8 +75,7 @@ exportieren.**
 Vom Rechner mit den privaten Dateien, Platzhalter ersetzen:
 
 ~~~bash
-scp szs-final.tar.gz szs-final.tar.gz.sha256 \
-  BENUTZER@SERVER:~/pz-docker-server/imports/
+scp szs-final.tar.gz szs-final.tar.gz.sha256 BENUTZER@SERVER:~/pz-docker-server/imports/
 ~~~
 
 Auf Debian im Codeverzeichnis, mit gestopptem Test-/Versionsprüfprojekt und
@@ -104,7 +103,7 @@ vorhandene private Daten nicht für einen erneuten Versuch löschen.
 ## 4. Explizit starten und neuen finalen Stand prüfen
 
 ~~~bash
-docker compose --env-file .env.live up -d pz-server pz-ops
+docker compose --env-file .env.live up -d --wait --wait-timeout 120 pz-server pz-ops
 ./pz --env-file .env.live status
 ./pz --env-file .env.live version
 ./pz --env-file .env.live config-state
@@ -142,6 +141,7 @@ Code-Rollback ersetzt keine Weltwiederherstellung und bewirkt keinen Steam-Downg
 
 Die bereits geprüfte private Restore-Kopie bekommt bewusst keinen separaten
 menschlichen Client-Test mehr; das ist kein Migrationsblocker. Noch ausstehend
-sind tatsächliche Debian-Installation/finaler Cutover und optional echte Discord-
-Abnahme. Diese Finalisierung veröffentlicht nichts auf GitHub und verändert weder
-Windows-Quellbestand noch frühere private Archive.
+sind Einrichtung des tatsächlichen Zielhosts, finaler Cutover und optional echte
+Discord-Abnahme. Die Debian-Installation ist inzwischen auf einer isolierten VM
+mit neu erzeugten Testdaten geprüft. Diese Prüfung veröffentlicht nichts auf
+GitHub und verändert weder Windows-Quellbestand noch frühere private Archive.

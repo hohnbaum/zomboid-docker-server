@@ -27,10 +27,11 @@ Betreiberbestätigung, eigene Runtime-/Unit-Prüfungen und offene Zielhostschrit
 
 ## Beibehaltene Betriebsgarantien
 
-- Unbekannte Spieler/RCON verweigern Save/Quit/Mutation; force erlaubt nur bekannte
+- Unbekannte Spieler/RCON verweigern Stop/Neustart/Backup; force erlaubt nur bekannte
   Belegung, niemals Kill oder unbekannten Zustand.
 - Dauerhafte Kernelguards für Agent, App und Daten; kein Docker-Socket, privilegierter
-  Dienst, beliebiger Shell-Endpunkt oder automatisches Steam-Update beim Booten.
+  Dienst oder beliebiger Shell-Endpunkt. Entrypoints starten Verwaltungsdienste;
+  fällige automatische Wartung kann nach dem Booten ein Update einreihen.
 - Bestehende degradierte Prozesse werden nicht automatisch beendet/neugestartet.
 - Import und Restore starten nicht selbst, erhalten false Intent/Pristine-Evidenz.
   Initiale Migrationsversion bleibt exakt 42.21.0; keine Gate-Abschwächung.
