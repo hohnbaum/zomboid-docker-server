@@ -43,14 +43,11 @@ def import_archive(layout, archive):
         declared = metadata.get('Version')
         if isinstance(declared, dict):
             declared = declared.get('version')
-        gate = read_json(stage / 'data/.migration-gate.json') or read_json(stage / 'data/.import-complete.json')
-        if (declared is not None and declared != '42.21.0') or (gate and gate.get('required_version') != '42.21.0'):
-            raise PZError('BLOCKED_VERSION')
         restored = backups.restore(layout, stage, _locked=True)
-        write_json(layout.data / '.migration-gate.json', {'required_version': '42.21.0', 'server': layout.server})
-        pristine = backups.create(layout, protected=True, _locked=True)
+        write_json(layout.data / '.migration-gate.json', {'version_policy': 'steam-public', 'source_version': declared, 'server': layout.server})
+        pristine = backups.create(layout, protected=True, version=declared, _locked=True)
         write_json(layout.data / '.pristine-verified.json', {'backup': pristine['name'], 'manifest_hash': pristine['ManifestHash']})
-        marker = {'server': layout.server, 'required_version': '42.21.0', 'created_at': now(),
+        marker = {'server': layout.server, 'version_policy': 'steam-public', 'source_version': declared, 'created_at': now(),
                   'archive_sha256': before, 'pristine_backup': pristine['name'], 'desired': False}
         write_json(layout.data / '.import-complete.json', marker)
         return {**restored, **marker}
@@ -131,12 +128,14 @@ def import_instance(layout, source):
         if os.name != 'nt':
             for directory, _, _ in os.walk(layout.data, topdown=False):
                 sync_dir(directory)
-        marker = {"server": layout.server, "required_version": "42.21.0", "created_at": now(),
+        # Raw persistence has no trustworthy game-version declaration. Preserve
+        # that unknown instead of inventing the historical acceptance version.
+        marker = {"server": layout.server, "version_policy": "steam-public", "source_version": None, "created_at": now(),
                   "reference": ident, "source_files": len(before), "source_bytes": sum(x["bytes"] for x in before.values()),
                   "active_files": sum(x["disposition"] == "active" for x in classified.values()), "databases_checked": databases}
         write_json(layout.state / "intent.json", {"desired": False, "updated_at": now()})
-        write_json(layout.data / ".migration-gate.json", {"required_version": "42.21.0", "server": layout.server})
-        pristine = backups.create(layout, protected=True, version={"version": "42.21.0", "source_evidence": True}, _locked=True)
+        write_json(layout.data / ".migration-gate.json", {"version_policy": "steam-public", "source_version": None, "server": layout.server})
+        pristine = backups.create(layout, protected=True, _locked=True)
         write_json(layout.data / ".pristine-verified.json", {"backup": pristine["name"], "manifest_hash": pristine["ManifestHash"]})
         write_json(layout.data / ".import-complete.json", marker)
         return {**marker, "desired": False, "pristine_backup": pristine["name"]}

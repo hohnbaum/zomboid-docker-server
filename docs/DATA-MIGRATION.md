@@ -63,9 +63,15 @@ geschütztes pristine Backup und **zuletzt** die Fertigmarkierung veröffentlich
 Intent bleibt desired=false. Der Import startet Java nicht.
 
 Backupimport benutzt denselben Restoreweg und erstellt seine neue Importprovenienz/
-Pristine-Evidenz. Ein deklarierter anderer PZ-Gate/Versionsstand wird vor Publikation
-verweigert. Der Erstimport bleibt exakt auf 42.21.0 begrenzt; aktuelle Linux-
-Start-Evidenz muss zum installierten Build gehören. Alte Windows-Logs zählen nicht.
+Pristine-Evidenz. Eine deklarierte Backupversion bleibt Quellprovenienz, keine
+feste Versionssperre; auch Backups neuerer PZ-Versionen werden übernommen. Rohe
+Persistence-Archive besitzen keine verlässliche Versionsdeklaration und werden
+mit unbekannter Quellversion markiert. Alte required_version-Marker bleiben
+kompatibel und sperren reguläre Updates nicht mehr. Vor Spielstart müssen
+Installation und Pristine-Evidenz gültig sein; die aktuelle Linux-Version wird
+beim neuen Start für den installierten Steam-Build nachgewiesen. Ohne sie kein
+READY. Alte Windows-Logs zählen nicht. Die Engine entscheidet über das Laden
+des Saveformats; geprüfte Archive allein garantieren keine PZ-/Mod-Kompatibilität.
 
 Der ältere import --source VERZEICHNIS bleibt kompatibel: Der bereits vorhandene
 Hosttransfer liest die gestoppte Quelle nativ, archiviert mit SHA-Inventar unter

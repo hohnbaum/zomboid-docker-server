@@ -75,14 +75,22 @@ a verified clean shutdown. Avoid `docker compose restart` while busy jobs run.
 
 `APP_INSTALL_INCOMPLETE`: a Steam installation failed or was interrupted. Keep the
 game stopped, inspect the private installation log and retry `pz install`.
-Start remains blocked until a successful installer clears the marker. A changed
-build requires new Linux startup version evidence before importing-world start.
+Start remains blocked until a successful installer clears the marker.
+`APP_BUILD_UNKNOWN` means appmanifest_380870.acf has no readable Steam build ID;
+complete the installation rather than inventing a manifest or deleting markers.
 
-`BLOCKED_VERSION`: the private imported marker requires 42.21.0 but this Steam
-build has another version or lacks current Linux startup evidence. Do not change
-the marker to force a test. A synthetic empty-world run may establish the current
-build's version; verified evidence survives service restart and is invalidated
-when the installed Steam build changes.
+`VERSION_UNVERIFIED`: the current build has not yet established its game version.
+A successful installation may launch, then the agent reads the first version=
+line of its own Linux startup and binds it to the installed Steam build. Without
+that evidence the process is degraded, not READY. Inspect current private startup
+logs. A separate empty-world probe is optional, not required after every update.
+
+There is no permanent 42.21.0 pin. Old required_version fields in private migration
+markers are provenance only; do not edit or delete them. If old runtime images
+still return BLOCKED_VERSION, stop controls and rebuild/recreate them from the
+updated repository as described in README's code-upgrade instructions. Normal
+Steam updates then follow the same backup/install/fresh-start path for imported
+worlds. Engine save compatibility and mods remain independent of this manager.
 
 Workshop reports retain `Missing`, `Unknown`, `Update` and `Current`. Remote API
 failure is Unknown. `workshop-update` requires a running instance and known safe

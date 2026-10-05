@@ -50,7 +50,8 @@ class HandoffTests(Fixture):
         self.assertEqual(manifest(self.layout.data), before)
         self.assertEqual((target.data / 'Lua/another-mod/data.json').read_bytes(), b'{"synthetic":true}')
         self.assertTrue(result['pristine_backup'])
-        self.assertEqual(read_json(target.data / '.migration-gate.json')['required_version'], '42.21.0')
+        self.assertEqual(read_json(target.data / '.migration-gate.json')['version_policy'], 'steam-public')
+        self.assertIsNone(result['source_version'])
         self.assertFalse(read_json(target.state / 'intent.json')['desired'])
 
     def test_backup_format_file_drop_reuses_restore_and_pristine(self):
@@ -93,14 +94,26 @@ class HandoffTests(Fixture):
             self.error('RESTORE_PUBLICATION_MISMATCH', backups.restore, target, self.layout.backups / item['name'])
         self.assertTrue((target.state / 'restore-journal.json').exists())
 
-    def test_backup_file_drop_cannot_weaken_another_version_gate(self):
+    def test_newer_version_backup_import_and_restore_preserve_data(self):
+        from pzops.util import write_json
+        write_json(self.layout.data / '.migration-gate.json', {'required_version': '42.21.0'})
         item = backups.create(self.layout, version='42.22.0')
         archive = Path(self.temp.name) / 'another-version.tar.gz'
         backups.export_archive(self.layout, item['name'], archive)
         target = backups_test_target(self)
         with FileLock(target.data / '.game-runtime.guard'):
-            self.error('BLOCKED_VERSION', migration.import_archive, target, archive)
-        self.assertFalse(target.ini.exists())
+            result = migration.import_archive(target, archive)
+        self.assertTrue(result['restored'])
+        self.assertEqual(result['source_version'], '42.22.0')
+        self.assertFalse(read_json(target.state / 'intent.json')['desired'])
+        self.assertEqual(target.ini.read_bytes(), self.layout.ini.read_bytes())
+        self.assertEqual(read_json(target.data / '.migration-gate.json')['version_policy'], 'steam-public')
+        self.assertEqual(backups.verify(target.backups / result['pristine_backup'])['Version'], '42.22.0')
+        restored = backups_test_target(self)
+        backups.restore(restored, self.layout.backups / item['name'])
+        self.assertEqual(read_json(restored.data / '.migration-gate.json')['required_version'], '42.21.0')
+        self.assertTrue(read_json(restored.data / '.pristine-verified.json')['verified_restore'])
+        self.assertFalse(read_json(restored.state / 'intent.json')['desired'])
 
     def test_file_drop_rejects_cache_link_and_mixed_scope(self):
         for name, link in (('app/secret', False), ('Server/linked.ini', True), ('../escape', False), ('instance/Server/mixed.ini', False)):

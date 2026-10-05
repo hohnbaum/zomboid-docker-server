@@ -61,7 +61,7 @@ class Agent:
         incomplete = (APP / ".pz-installing.json").exists()
         version = evidence.get("version") if evidence.get("version_build") == build else None
         # Only this agent's current launch establishes version evidence. Copied logs
-        # and previous build logs cannot satisfy the imported-world gate.
+        # and previous build logs cannot identify the currently installed version.
         path = LOGS / "game-console.log"
         if not incomplete and self.log_offset is not None and path.exists():
             with path.open("rb") as stream:
@@ -157,7 +157,7 @@ class Agent:
         for name in ("pzversion", "version.txt", "media/lua/shared/defines.lua"):
             path = APP / name
             if path.is_file():
-                m = re.search(r"\b(42\.\d+\.\d+)\b", path.read_text(errors="replace"))
+                m = re.search(r"\b(\d+\.\d+\.\d+)\b", path.read_text(errors="replace"))
                 if m:
                     version = m[1]
                     break
@@ -181,11 +181,13 @@ class Agent:
             raise PZError("APP_INSTALL_INCOMPLETE")
         if not current["installed"]:
             raise PZError("APP_NOT_INSTALLED")
+        if not current["build"]:
+            raise PZError("APP_BUILD_UNKNOWN")
         imported = read_json(DATA / ".import-complete.json") or read_json(DATA / ".migration-gate.json")
         if imported:
-            required = imported.get("required_version")
-            if required != "42.21.0" or current["version"] != required:
-                raise PZError("BLOCKED_VERSION")
+            # Legacy required_version fields are migration provenance, never a
+            # permanent pin. A new Steam build establishes its own version on
+            # this launch; requiring that evidence BEFORE launch deadlocks updates.
             pristine = read_json(DATA / ".pristine-verified.json")
             if not isinstance(pristine, dict) or not isinstance(pristine.get("backup"), str) or not re.fullmatch(r"[a-f0-9]{64}", pristine.get("manifest_hash", "")):
                 raise PZError("PRISTINE_BACKUP_REQUIRED")

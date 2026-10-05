@@ -1,6 +1,6 @@
 # Stand der Docker-Migration
 
-Stand: 4. Oktober 2026. Discovery, Implementierung und lokale Finalisierung sind
+Stand: 5. Oktober 2026. Discovery, Implementierung und lokale Finalisierung sind
 abgeschlossen. Der private Snapshot bleibt unverändert; es wird keine Produktion
 kontaktiert und in dieser Finalisierung nichts auf GitHub veröffentlicht.
 
@@ -9,7 +9,7 @@ kontaktiert und in dieser Finalisierung nichts auf GitHub veröffentlicht.
 | Bereich | Stand |
 | --- | --- |
 | Repository | Eigenständiges main, nur Code/Dokumentation/synthetische Tests, ignorierte private Ablage, Public-tree-/History-Audit |
-| Linux-Spiel | SteamCMD, nativer mitgelieferter JVM-Launcher, UID 1000, exakte 42.21.0-/Build-Evidenz, frischer pztest READY |
+| Linux-Spiel | SteamCMD, nativer mitgelieferter JVM-Launcher, UID 1000, Versions-/Build-Evidenz, reguläre Updates ohne festen Pin; historische Abnahme 42.21.0 |
 | Private importierte Testkopie | Betreiber bestätigt READY, 111 Workshop Current, 137 Mods, vorhandenen Account/lebenden Charakter und interaktive erwartete Welt |
 | Persistenz | Vollständige Server/Saves/db/Lua/options-Backups, geschützte Pristine-/Referenzkopien, Retention und geprüfter Runtime-Restore |
 | Linux-File-Drop | Vorhandenen begrenzten Extractor/Import/Restore erweitert, externer SHA-Sidecar, Linux-Inventar/integrity_check, neues Ziel und false Intent |
@@ -34,7 +34,8 @@ Betreiberbestätigung, eigene Runtime-/Unit-Prüfungen und offene Zielhostschrit
   fällige automatische Wartung kann nach dem Booten ein Update einreihen.
 - Bestehende degradierte Prozesse werden nicht automatisch beendet/neugestartet.
 - Import und Restore starten nicht selbst, erhalten false Intent/Pristine-Evidenz.
-  Initiale Migrationsversion bleibt exakt 42.21.0; keine Gate-Abschwächung.
+  Keine feste Versionssperre: importierte Welten unterstützen normale Steam-Updates.
+  Altmarker bleiben Provenienz; READY verlangt Versionsevidenz des aktuellen Builds.
 - Backups/Archive prüfen Hashes, Inventar, SQLite und kohärente Pending-Provenienz.
   Auch veröffentlichte Kopien über Volumegrenzen werden erneut geprüft.
 - Unterbrochene Jobs brauchen explizite Recovery, keinen blinden Replay.

@@ -110,9 +110,9 @@ weiterhin 2g. Bestehende private Env-Dateien wurden nicht geändert. Die obigen
 realen Live-/Restore-Starts belegen weiterhin 6g; ein neuer Spielstart mit 8g
 wurde für diese Dokumentationsergänzung nicht ausgeführt.
 
-Erklärt sind der fest codierte, dauerhafte 42.21.0-Gate, die separate Linux-
-Versionsevidenz samt Steam-Build-Bindung und die Konsequenz für spätere Upgrades.
-Der Gate und die SteamCMD-Installationspolitik wurden nicht geändert. Der genaue
+Zu diesem Zwischenstand war der fest codierte, dauerhafte 42.21.0-Gate noch
+vorhanden und wurde erklärt. **Die nachfolgende Korrektur entfernt diese Sperre.**
+Die SteamCMD-Installationspolitik bleibt erhalten. Der genaue
 Dateiweg vom Windows-Persistence-Archiv über imports/ ins Linux-Datenvolume sowie
 der spätere Linux-Backup-Export stehen getrennt im README und Handoff.
 
@@ -141,3 +141,35 @@ Die Linux-Regression lief ohne Netzwerk mit einer Kopie ausschließlich öffentl
 Code-/Testdateien im Container. Der eigene Container für den Konfigurationstransport
 ist entfernt; dessen synthetisches Testvolume bleibt erhalten. Frühere private
 Quelldaten, Testwelten und Archive wurden für diese Ergänzung nicht verwendet.
+
+## Korrektur: Reguläre PZ-Updates für importierte Welten
+
+Die dauerhafte 42.21.0-Sperre war mit dem normalen Betrieb unvereinbar und wurde
+aus Start und Backupimport entfernt. Alte required_version-Marker werden weiter
+gelesen, dienen aber nur als Provenienz. Neue Imports verwenden version_policy=
+steam-public; portable Backups behalten ihre deklarierte Quellversion, rohe
+Persistence-Archive bleiben hinsichtlich der Quellversion unbekannt.
+
+Ein vollständig installierter Build darf vor seinem ersten Versionsnachweis
+starten; der Nachweis entsteht aus diesem Linux-Start und muss zur installierten
+Steam-Build-ID gehören. READY verlangt ihn jetzt zusätzlich zu eigenem Prozess,
+UDP und authentifiziertem RCON. APP_INSTALL_INCOMPLETE, fehlende Build-ID,
+Pristine-/Hash-/SQLite-/Pending-Prüfungen und die sichere Spielerpolitik bleiben
+aktiv. Eine optionale leere Probe ist nicht bei jedem Update erforderlich.
+
+Neue Regressionen prüfen den synthetischen Wechsel 42.21.0 → 42.22.0 mit altem
+Importmarker: Safety-Backup der alten Version vor SteamCMD, ungültig gewordene
+alte Evidenz, Start mit zunächst unbekannter neuer Version, neuer Nachweis und
+READY sowie unveränderte Altmarker. Weiter geprüft sind Restore/Import neuerer
+Backups, unbekannte Version bei laufendem Prozess, neuere Hauptversion im
+Readiness-Test, fehlgeschlagene Installation und Backup-/false-Intent-Erhaltung.
+
+Ergebnis: **122 Tests PASS**, Linux/Python 3.12 mit 1 Skip, Windows mit 6 Skips.
+Compilation, 25 Bash-Blöcke und 18 lokale Markdown-Links sind geprüft. Neue
+Server-/Ops-Images unter eigenem Prüfprojektnamen gebaut und ihre Codeimports
+ohne Netzwerk/Datenmounts geprüft; alle vier öffentlichen Compose-Beispiele
+bestehen die Grenzprüfung. Public-tree/history-Audit erneut bestanden. Die Tests
+verwenden Fake-SteamCMD/Launcher/RCON und synthetische Welten; ein noch zukünftiger
+echter 42.22-Release samt privater Modwelt ist damit nicht abgenommen. Die private
+Welt und bestehende Runtime-Volumes wurden für diese Codeänderung nicht gestartet
+oder verändert. Frühere reale 42.21.0-/6g-Prüfungen bleiben historische Evidenz.

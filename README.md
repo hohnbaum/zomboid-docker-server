@@ -166,7 +166,8 @@ docker compose --env-file .env.test ps
 Spieler-Serverpasswort. RCON- und Bootstrap-Admin-Passwort werden sicher zufällig
 erzeugt und bleiben privat; der interne API-Token ebenfalls. `init-empty` ersetzt
 keine bestehende Welt. `start` wartet auf READY: eigener Spielprozess, beide
-UDP-Listener und authentifiziertes RCON mit lesbarer Spielerzahl.
+UDP-Listener, authentifiziertes RCON mit lesbarer Spielerzahl und nachgewiesene
+Spielversion für den installierten Steam-Build.
 
 `up --wait` wartet auf die gesunden Control-Dienste, bevor `install` bzw. `start`
 deren API verwenden. Bei einem Fehler **nicht die nächsten Zeilen weiter ausführen**:
@@ -246,9 +247,10 @@ docker compose --env-file .env.test stop pz-ops pz-server
 Die Container müssen gestoppt sein, damit die Host-Ports frei werden; ein gestoppter
 Spielprozess allein reicht nicht. Testvolumes bleiben für spätere Tests erhalten.
 
-Der Import besitzt weiterhin einen strikten 42.21.0-Gate. Ein unabhängig installiertes
-Live-App-Volume benötigt dafür **eigene Linux-Start-Evidenz**. Diese wird einmal mit
-einer temporären leeren Instanz auf genau dem Live-App-Volume erzeugt:
+Vor dem privaten Import kann die unabhängige Live-App-Installation mit einer
+temporären leeren Instanz vorab geprüft werden. Dieser Prüflauf ist empfohlen,
+aber **keine Versionssperre und keine Voraussetzung nach jedem Update**. Er liefert
+Linux-Start-Evidenz auf genau dem Live-App-Volume, ohne die private Welt zu laden:
 
 ```bash
 cp .env.versioncheck.example .env.versioncheck
@@ -269,34 +271,38 @@ Dabei müssen Test und Live gestoppt sein. Nur dieser temporäre Prüflauf nutzt
 pzlive_app/pzlive_workshop; sein leerer Datenbestand ist getrennt. Der dauerhafte
 pztest teilt keine Volumes mit Live. Wenn COMPOSE_PROJECT_NAME geändert wird,
 die zwei Volumennamen im Versionsprüfprofil entsprechend anpassen.
-Nur bei bestätigter **42.21.0** fortfahren. Ein späterer anderer Steam-Build braucht
-neue passende Evidenz; alte Logs oder geänderte Hashes ersetzen diese nicht.
+Der Prüflauf muss READY erreichen und eine konkrete Spielversion/Steam-Build-ID
+melden. 42.21.0 ist die historische Migrationsabnahme, keine dauerhaft erforderliche
+Version. Vor dem Cutover die Kompatibilität der aktuellen Windows-Welt, Mods und
+Clients mit dem nun installierten Linux-Build prüfen.
 
-### Was der Versions-Gate tatsächlich prüft
+### Versionsnachweis und reguläre PZ-Updates
 
-Für importierte Welten ist **42.21.0 fest im Code vorgegeben**, nicht als
-änderbare VERSION-Umgebungsvariable. Der Import schreibt required_version=42.21.0
-in private Migrationsmarker. Vor einem neuen Spielstart prüft
-[server/agent.py](server/agent.py), dass sowohl dieser Marker als auch die
-nachgewiesene installierte Spielversion exakt 42.21.0 sind; sonst BLOCKED_VERSION.
-Auch ein veränderter Marker auf eine andere Version wird verweigert.
+Es gibt **keinen festen 42.21.0-Pin** und keine VERSION-Env, die bei jedem Release
+angepasst werden muss. install/update verwenden SteamCMD für App 380870; die
+Updateprüfung vergleicht die lokale Steam-Build-ID mit der öffentlichen Steam-
+Branch. Ein Versionswechsel wie 42.21.0 → 42.22.0 darf auch für importierte und
+wiederhergestellte Welten über den normalen Updateablauf erfolgen.
 
-Die tatsächlich installierte Version stammt aus der ersten version=-Meldung
-eines vom Linux-Agent gestarteten Spielprozesses. Die Evidenz wird auf dem
-App-Volume gespeichert und an die Steam-Build-ID aus appmanifest_380870.acf
-gebunden. Ändert sich die Build-ID, zählt die alte Evidenz nicht mehr. Deshalb
-startet die leere Versionsprüfung zuerst genau diese App-Installation, bevor sie
-die importierte Welt laden darf. Kopierte Windows-Logs zählen nicht.
+Vor dem Start müssen die Installation vollständig, der Linux-Launcher vorhanden
+und die Steam-Build-ID lesbar sein. Importdaten brauchen weiterhin ein verifiziertes
+Pristine-Backup. Der [Agent](server/agent.py) lässt dann den neuen Spielprozess
+starten, auch wenn dessen Version vorher noch unbekannt ist. Erst die erste
+version=-Meldung dieses Linux-Starts identifiziert die Spielversion. Der Nachweis
+liegt auf dem App-Volume und gehört zur aktuellen Steam-Build-ID; bei geändertem
+Build gelten alte Logs/Evidenz nicht mehr. Ohne Versionsnachweis meldet ein
+laufender Prozess VERSION_UNVERIFIED und erreicht kein READY.
 
-Das ist **kein Vergleich mit der Client-Version oder der neuesten Steam-Version**.
-SteamCMD installiert den verfügbaren Build; der Gate pinnt und lädt keinen alten
-Build herunter. Die Steam-Updateprüfung im Betrieb ist davon unabhängig.
-Ein anderer Build mit nachgewiesener Version 42.21.0 kann passieren; eine neue
-Spielversion wie 42.22.0 bleibt für importierte Welten gesperrt. Der Gate gilt auch
-nach dem Erststart und für wiederhergestellte Importwelten. Für ein späteres
-Versionsupgrade muss diese Code-Vorgabe bewusst weiterentwickelt und die Migration
-getestet werden; eine Änderung in .env.live genügt nicht. Frische leere Testwelten
-ohne Migrationsmarker unterliegen diesem Gate nicht.
+Ältere private Migrationsmarker mit required_version=42.21.0 bleiben lesbar; das
+Feld ist historische Provenienz und sperrt keine Updates mehr. Neue Imports
+speichern version_policy=steam-public und die deklarierte Quellversion eines
+portablen Backups. Bei rohen Windows-Archiven ist diese unbekannt und wird nicht
+als 42.21.0 erfunden. Backups neuerer Versionen können importiert/restored werden.
+
+Die Versionsmeldung ist kein automatischer Client-/Mod-/Save-Kompatibilitätstest.
+Die Engine muss die Welt laden können, und Clients müssen zur Serverversion
+passen. Das Safety-Backup vor dem Update bleibt deshalb entscheidend; SteamCMD
+führt keinen automatischen Binär-Downgrade durch.
 
 ## 7. Finale Windows-Welt als privaten File-Drop importieren
 
@@ -391,7 +397,8 @@ Das Live-Datenvolume muss **neu und leer** sein. Beide Live-Control-Dienste müs
 beim Import gestoppt sein. Der Import prüft Archiv-SHA, Pfade, Inventar, Kopien,
 SQLite und Konfigurationsreihenfolge, erzeugt ein geschütztes pristine Backup und
 setzt **desired=false**. Java startet erst mit dem separaten `start`-Befehl.
-Ein Nicht-42.21.0-Build führt zu BLOCKED_VERSION; den Gate nicht abschwächen.
+Der installierte Build ist nicht auf 42.21.0 begrenzt. Eine fehlgeschlagene oder
+unvollständige Installation wird weiterhin verweigert; siehe Abschnitt 6.
 
 Nach READY mit dem realen Client verbinden und Account, lebenden Charakter,
 erwartete Welt und repräsentative Mods prüfen. Bei Wechsel von pztest zu Live den
@@ -490,9 +497,26 @@ Unterbrochene Jobs setzen false Intent/Recovery und werden nicht blind wiederhol
 Zusätzlich prüft die stündliche Wartung ungefähr alle sechs Stunden den Steam-Build
 und nach 24 Stunden ohne reguläres Backup dessen Fälligkeit. Bei true Intent und
 ohne Wartung/Recovery kann sie ein Update bzw. Backup einreihen; Änderungen erfordern
-bekannte null Spieler. Bei Importdaten bleibt auch nach einem Update der 42.21.0-
-Gate bestehen. Ein anderer installierter Build kann daher den Wiederstart blockieren;
-vor einem geplanten Versionswechsel Kompatibilität und Wiederherstellung vorbereiten.
+bekannte null Spieler. Importierte Welten nehmen am selben Updateablauf teil;
+keine Migrationsversion blockiert den neuen Build. Bei einem Updatefehler bleibt
+desired=false und das Pre-Update-Backup erhalten. Ein schon gestoppter Server
+wird durch update nicht ungefragt gestartet.
+
+Für ein geplantes reguläres PZ-Update alle Spieler abmelden und bei gesunden
+Controls sowie deaktivierter Operator-Wartung ausführen:
+
+```bash
+./pz --env-file .env.live update
+./pz --env-file .env.live version
+./pz --env-file .env.live health
+```
+
+Ein laufender Server wird gespeichert/gestoppt, als pre-server-update gesichert,
+mit SteamCMD aktualisiert und frisch gestartet. READY bestätigt die neue Version,
+UDP und RCON. War das Spiel vorher bewusst offline (desired=false), bleibt es
+offline; anschließend bei Bedarf ./pz --env-file .env.live start ausführen.
+Neue PZ-Releases erfordern dafür keine Änderung am Management-Code oder an einer
+Versionsvariable. Mods und menschlichen Client danach wie üblich prüfen.
 
 ### INI und Lua bearbeiten
 
@@ -660,7 +684,7 @@ Ein von einem anderen Host hochgeladenes Archiv stattdessen unter imports/ verwe
 und wie in Abschnitt 7 lesbar vorbereiten. Zielprojekt/-Secretpfad müssen neu sein.
 
 Vor dem ersten Restore-Start müssen Live und Test samt Controls gestoppt sein.
-Für ein importiertes Backup die eigene leere Versionsprüfung auf dem neuen
+Optional die neue App-Installation vorab mit einer leeren Versionsprüfung auf dem neuen
 pzrestore_app/pzrestore_workshop ausführen:
 
 ```bash
@@ -679,7 +703,7 @@ docker compose --env-file .env.restorecheck up -d --wait --wait-timeout 120 pz-s
 docker compose --env-file .env.restorecheck stop pz-ops pz-server
 ```
 
-Nur bei bestätigter **42.21.0** anschließend die wiederhergestellte Welt starten:
+Bei passendem aktuellen PZ-/Mod-Build anschließend die wiederhergestellte Welt starten:
 
 ```bash
 docker compose --env-file .env.restore up -d --wait --wait-timeout 120 pz-server pz-ops
@@ -737,8 +761,12 @@ stoppen. Live-Discord wurde ohne bereitgestellte Credentials nicht abgenommen.
   Keine Mods automatisch löschen oder die Welt wegen eines Fehlversuchs ändern.
 - **STARTING_OR_DEGRADED:** fehlende UDP-/RCON-Evidenz; vorhandenen Prozess privat
   diagnostizieren. READINESS_TIMEOUT beendet ihn nicht automatisch.
-- **BLOCKED_VERSION / APP_INSTALL_INCOMPLETE:** kompatiblen Build bzw. erfolgreiche
-  explizite Installation herstellen; Gates nicht durch Markeränderungen umgehen.
+- **APP_INSTALL_INCOMPLETE / APP_BUILD_UNKNOWN:** private Steam-Installationslogs
+  prüfen und install mit demselben Profil erfolgreich abschließen. Keine Marker
+  löschen; required_version aus früheren Importen ist keine aktive Versionssperre.
+- **VERSION_UNVERIFIED:** aktuelle Linux-Startausgabe und Steam-Build-ID prüfen.
+  Kopierte Logs beweisen die neue Version nicht. Erst mit aktueller Evidenz kann
+  READY erreicht werden; keine zusätzliche leere Probe pro Update erforderlich.
 - **STEAM_INSTALL_FAILED:** den Job und dessen privates Steam-Installationslog
   prüfen. Im Debian-Prüflauf scheiterte der erste Download mit SteamCMD
   „Missing configuration“; der erneute `install`-Aufruf installierte erfolgreich.

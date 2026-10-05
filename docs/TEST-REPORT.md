@@ -39,6 +39,15 @@ erstellt werden. Wird nach einem Export erneut gespielt, ist dieser nur historis
 
 ## Aktuelle automatisierte Prüfungen
 
+Nach der Korrektur der dauerhaften Migrationsversionssperre am 5. Oktober:
+**122 Tests PASS**, Linux mit 1 Skip, Windows mit 6 Skips. Neue Regressionen
+prüfen ein normales 42.21.0 → 42.22.0-Update einer importierten Welt mit altem
+Marker, Safety-Backup vor SteamCMD, neuen Linux-Versionsnachweis, READY und
+Backup-/false-Intent-Erhaltung bei Fehler. Import/Restore neuerer Backups werden
+ebenfalls geprüft. 42.21.0 ist historische Abnahme, keine aktive Versionsvorgabe.
+Die neuen Versionswechseltests sind synthetisch und nehmen keinen zukünftigen
+echten PZ-Release oder private Mod-Kompatibilität vorweg. Details: [README-Prüfung](README-CHECK.md).
+
 Am 5. Oktober wurden die README-Befehle zusätzlich über echtes Debian-SSH und
 einen eigenen Docker-Daemon mit neuen synthetischen Welten ausgeführt, einschließlich
 6g-Live-/Restore-Starts, Instanzwechsel, Management, Export/Restore und Wiederanlauf.
@@ -73,7 +82,8 @@ Discord-Rollen, Redaction und Public-tree-Prüfungen. Neue Regressionen prüfen:
 - rohen Persistence-File-Drop, vorhandenes Backupformat und externe SHA-Sidecars;
 - volle Lua-Persistenz und Account-DB-Journals, Quellen unverändert;
 - Traversal/Links/falsche Hashes/unerlaubte Archivteile und belegte Importziele;
-- unveränderten 42.21.0-Gate bei Backupimport;
+- im damaligen Stand den 42.21.0-Gate bei Backupimport (inzwischen durch die oben
+  beschriebenen Update-/Restore-Regressionen ohne feste Versionssperre ersetzt);
 - Hashprüfung **nach** Veröffentlichung über Volumegrenzen; fehlgeschlagene
   Imports erhalten keine Fertigmarkierung, Restorefehler behalten ihr Journal;
 - begrenzten Logtail, aktuelle Workshop-Fehlerdiagnose und native Windows-/POSIX-

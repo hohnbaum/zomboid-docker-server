@@ -152,7 +152,10 @@ class FailureTests(Fixture):
             result = migration.import_instance(target, source)
         self.assertEqual(manifest(source), before)
         self.assertFalse(read_json(target.state / 'intent.json')['desired'])
-        self.assertEqual(read_json(target.data / '.import-complete.json')['required_version'], '42.21.0')
+        marker = read_json(target.data / '.import-complete.json')
+        self.assertEqual(marker['version_policy'], 'steam-public')
+        self.assertIsNone(marker['source_version'])
+        self.assertIsNone(backups.verify(target.backups / result['pristine_backup'])['Version'])
         self.assertTrue(read_json(target.data / '.pristine-verified.json'))
         self.assertFalse((target.data / 'backups').exists())
         self.assertEqual(Ini.read(target.ini).mod_state(), Ini(BASE).mod_state())
@@ -177,6 +180,12 @@ def backups_test_target(fixture):
 
 
 class AgentTests(Fixture):
+    class Child:
+        def __init__(self):
+            self.stdin, self.stdout, self.pid, self.exit = io.BytesIO(), io.BytesIO(), 99999, None
+        def poll(self):
+            return self.exit
+
     def setUp(self):
         super().setUp()
         spec = importlib.util.spec_from_file_location('linux_agent', ROOT / 'server/agent.py')
@@ -209,11 +218,59 @@ class AgentTests(Fixture):
             self.agent.child_log.close()
         super().tearDown()
 
-    def test_import_mismatch_and_pristine_gate(self):
+    def test_legacy_import_version_is_not_a_pin_but_pristine_is_required(self):
         write_json(self.layout.data / '.import-complete.json', {'required_version': '42.22.0'})
-        self.error('BLOCKED_VERSION', self.agent.start, 'synthetic-job')
-        write_json(self.layout.data / '.import-complete.json', {'required_version': '42.21.0'})
         self.error('PRISTINE_BACKUP_REQUIRED', self.agent.start, 'synthetic-job')
+
+    def test_steam_upgrade_of_imported_world_launches_before_version_is_known(self):
+        write_json(self.layout.data / '.import-complete.json', {'required_version': '42.21.0'})
+        write_json(self.layout.data / '.pristine-verified.json', {'backup': 'synthetic-pristine', 'manifest_hash': '0' * 64})
+        atomic_bytes(self.layout.logs / 'game-console.log', b'version=42.21.0\n')
+        self.agent.log_offset = 0
+        def install(*args, **kwargs):
+            atomic_bytes(self.module.APP / 'steamapps/appmanifest_380870.acf', b'"buildid" "2000"')
+            kwargs['stdout'].write(b"Success! App '380870' fully installed.\n")
+            return subprocess.CompletedProcess(args[0], 0)
+        with patch.object(self.module.subprocess, 'run', side_effect=install):
+            result = self.agent.install('synthetic-upgrade')
+        self.assertEqual(result['build'], '2000')
+        self.assertIsNone(result['version'])
+        self.assertFalse(result['installation_incomplete'])
+        child = self.Child()
+        child.stdout.write(b'version=42.22.0\nmod version=99.0.0\n')
+        child.stdout.seek(0)
+        with patch.object(self.module.subprocess, 'Popen', return_value=child) as spawn, patch.object(self.module.threading, 'Thread') as thread:
+            thread.return_value.start.side_effect = lambda: self.module.pump(child.stdout, self.agent.child_log, [])
+            started = self.agent.start('synthetic-after-upgrade')
+        self.assertEqual(spawn.call_count, 1)
+        self.assertEqual(started['version'], '42.22.0')
+        self.assertEqual(started['build'], '2000')
+        self.assertEqual(read_json(self.module.APP / '.pz-install.json')['version_build'], '2000')
+        self.assertEqual(read_json(self.layout.data / '.import-complete.json')['required_version'], '42.21.0')
+
+    def test_legacy_gate_only_restored_world_starts_on_newer_version(self):
+        write_json(self.layout.data / '.migration-gate.json', {'required_version': '42.21.0'})
+        write_json(self.layout.data / '.pristine-verified.json', {'backup': 'synthetic-restore', 'manifest_hash': '0' * 64})
+        write_json(self.module.APP / '.pz-install.json', {'version': '42.22.0', 'version_build': '1000'})
+        with patch.object(self.module.subprocess, 'Popen', return_value=self.Child()) as spawn:
+            result = self.agent.start('synthetic-restored')
+        self.assertEqual(spawn.call_count, 1)
+        self.assertEqual(result['version'], '42.22.0')
+
+    def test_missing_build_manifest_blocks_launch(self):
+        (self.module.APP / 'steamapps/appmanifest_380870.acf').unlink()
+        with patch.object(self.module.subprocess, 'Popen') as spawn:
+            self.error('APP_BUILD_UNKNOWN', self.agent.start, 'synthetic-job')
+        spawn.assert_not_called()
+
+    def test_failed_upgrade_cannot_launch_imported_world(self):
+        write_json(self.layout.data / '.import-complete.json', {'required_version': '42.21.0'})
+        write_json(self.layout.data / '.pristine-verified.json', {'backup': 'synthetic-pristine', 'manifest_hash': '0' * 64})
+        with patch.object(self.module.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1)):
+            self.error('STEAM_INSTALL_FAILED', self.agent.install, 'synthetic-failed-upgrade')
+        with patch.object(self.module.subprocess, 'Popen') as spawn:
+            self.error('APP_INSTALL_INCOMPLETE', self.agent.start, 'synthetic-start')
+        spawn.assert_not_called()
 
     def test_stale_log_cannot_prove_new_build(self):
         atomic_bytes(self.module.APP / 'steamapps/appmanifest_380870.acf', b'"buildid" "2000"')
@@ -236,12 +293,7 @@ class AgentTests(Fixture):
         self.assertEqual(read_json(self.module.APP / '.pz-install.json')['version_build'], '1000')
 
     def test_start_is_idempotent_and_heap_uses_package(self):
-        class Child:
-            def __init__(self):
-                self.stdin, self.stdout, self.pid, self.exit = io.BytesIO(), io.BytesIO(), 99999, None
-            def poll(self):
-                return self.exit
-        with patch.object(self.module.subprocess, 'Popen', return_value=Child()) as spawn, patch.dict(os.environ, {'PZ_HEAP': '2g'}):
+        with patch.object(self.module.subprocess, 'Popen', return_value=self.Child()) as spawn, patch.dict(os.environ, {'PZ_HEAP': '2g'}):
             first = self.agent.start('synthetic-job')
             second = self.agent.start('synthetic-job')
         self.assertEqual(spawn.call_count, 1)

@@ -106,7 +106,11 @@ class Operations:
             reasons.append("UDP_MISSING_OR_NOT_OWNED")
         if proc.get('startup_issue'):
             reasons.append(proc['startup_issue'])
-        ready = bool(proc.get("running") and all(udp.values()) and rcon_ok and known)
+        version = proc.get("version")
+        version_verified = bool(isinstance(version, str) and re.fullmatch(r"\d+\.\d+\.\d+", version) and proc.get("build"))
+        if proc.get("running") and not version_verified:
+            reasons.append("VERSION_UNVERIFIED")
+        ready = bool(proc.get("running") and all(udp.values()) and rcon_ok and known and version_verified)
         desired = self.intent()
         maintenance = self.maintenance()
         recovery = self.recovery_required()

@@ -92,15 +92,21 @@ and Linux cachedir to the launcher. It uses the packaged Java runtime.
 Steam build comes from appmanifest_380870.acf. Version evidence is taken only
 from the first PZ version= line after the current agent launch-log offset and tied
 to that build. Later mod version messages cannot replace it. Copied console
-logs and previous-build evidence cannot satisfy the imported-world gate.
-Imported data initially requires exactly 42.21.0 and pristine verification.
+logs and previous-build evidence cannot identify a new installed build. There is
+no fixed game-version pin: both imported and fresh worlds follow Steam updates.
+Legacy required_version migration fields remain provenance only. A successful
+installation with a readable Steam build may launch before its game version is
+known; readiness waits for version evidence as well as UDP/RCON. Imported data
+still requires pristine verification. Raw source archives have unknown source
+version; portable backup imports preserve their declared version for provenance.
 An installation-in-progress marker invalidates version evidence and blocks game
 start until an explicit installation succeeds. Agent stdout is filtered before
 writing the private game log to mask the configured game, RCON and synthetic
 bootstrap admin secrets, including values split across read chunks.
 
 READY requires the current owned game process, configured owned UDP listeners,
-authenticated RCON and a parseable player count. Internet/Steam availability is
+authenticated RCON, a parseable player count and a known game version tied to the
+installed Steam build. Internet/Steam availability is
 reported separately and never required for READY. Health returns running,
 launching, ready, desired, maintenance, player-known state, RCON/UDP, generation,
 version/build, backup age, pending validity, UTC reasons and resource metrics.

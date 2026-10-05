@@ -22,8 +22,8 @@ Die vollständigen Bash-Befehle stehen im [deutschen README](../README.md):
 4. Leeren pztest installieren, READY/Health/Version prüfen, Client auf UDP 16261
    testen; Serverpasswort ist leer. RCON/Admin/API bleiben private Secrets.
 5. Test kontrolliert stoppen **und seine Controlcontainer stoppen**, Volumes behalten.
-6. Das unabhängige Live-App-Volume einmal mit der leeren temporären Versionsprüfung
-   aus .env.versioncheck.example installieren/starten. Exakt 42.21.0 bestätigen,
+6. Empfohlen: das unabhängige Live-App-Volume mit der leeren temporären Versionsprüfung
+   aus .env.versioncheck.example installieren/starten. READY, Spielversion/Build prüfen,
    dann Spiel und Controls stoppen. Nur dieser temporäre Prüflauf teilt das
    Live-App-/Workshopvolume; seine leere Datenwelt ist eigenständig.
 
@@ -104,8 +104,10 @@ Der Wrapper bindet nur den privaten Archivordner read-only in netzlose Tools ein
 Der gemeinsame Parser prüft Pfade, Größen, Einträge und Hashes; Import prüft Kopien,
 Inventar, INI-Reihenfolge und SQLite. Auch nach einem Volumewechsel veröffentlichte
 Dateien werden erneut gehasht. Es entstehen private Referenzprovenienz, geschütztes
-pristine Backup und zuletzt die Import-Fertigmarkierung. Der exakte 42.21.0-Gate
-bleibt erhalten.
+pristine Backup und zuletzt die Import-Fertigmarkierung. Die Quellversion eines
+portablen Backups wird als Provenienz erhalten; bei rohen Archiven ist sie
+unbekannt. Es gibt keine feste 42.21.0-Sperre. Alte required_version-Marker
+bleiben kompatibel und verhindern keine regulären Steam-Updates.
 
 Erfolgreicher Import meldet **desired=false** und startet Java nicht.
 Unvollständige/fehlerhafte Ziele offline lassen und ein neues Ziel verwenden;
@@ -123,8 +125,9 @@ docker compose --env-file .env.live up -d --wait --wait-timeout 120 pz-server pz
 ./pz --env-file .env.live workshop-status
 ~~~
 
-Nur mit bestätigter 42.21.0 und gültigem Pristine-Gate starten. READY verlangt
-eigenen Prozess, beide UDP-Sockets und authentifiziertes RCON/lesbare Spielerzahl.
+Mit vollständiger App-Installation und gültiger Pristine-Evidenz starten. READY
+verlangt eigenen Prozess, beide UDP-Sockets, authentifiziertes RCON/lesbare
+Spielerzahl und eine nachgewiesene Version für den installierten Steam-Build.
 Mit vollständig neu gestartetem Client auf den Debian-Host, Port 16261 verbinden;
 Account, lebenden Charakter, erwarteten **letzten** Spielstand und repräsentative
 Mods prüfen. Live-Spielerpasswort kommt aus der privaten Windows-Konfiguration.
@@ -154,6 +157,11 @@ Der spätere Linux-Export erzeugt aus einem Linux-Backup ein portables Archiv un
 Handoff herunterladen und auf dem nächsten Linux-Host mit restore --archive einlesen.
 INI-/Lua-Bearbeitung und Mod-Add/Remove-Pläne sind in README, Abschnitt 9,
 als eigene Bedienabläufe beschrieben.
+Reguläre PZ-Updates erfolgen ebenfalls dort über ./pz --env-file .env.live update:
+Safety-Backup, SteamCMD und bei zuvor laufendem Spiel frischer Start mit neuer
+Versionsevidenz. Eine leere Versionsprobe ist nicht nach jedem Update notwendig.
+Bei Fehler bleibt false Intent und das Pre-Update-Backup erhalten. Der Server
+ist nicht auf die historisch abgenommene Version festgelegt.
 
 Die bereits geprüfte private Restore-Kopie bekommt bewusst keinen separaten
 menschlichen Client-Test mehr; das ist kein Migrationsblocker. Noch ausstehend

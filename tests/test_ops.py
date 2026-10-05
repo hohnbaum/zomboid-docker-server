@@ -349,6 +349,55 @@ class BackupTests(Fixture):
 
 
 class PolicyTests(Fixture):
+    def test_readiness_requires_observed_version_but_accepts_future_versions(self):
+        self.proc['version'] = None
+        state = self.ops.status()
+        self.assertFalse(state['ready'])
+        self.assertIn('VERSION_UNVERIFIED', state['detail'])
+        for version in ('42.22.0', '43.0.0'):
+            self.proc['version'] = version
+            self.assertTrue(self.ops.status()['ready'])
+
+    def test_running_update_backs_up_old_version_then_restarts_new_build(self):
+        write_json(self.layout.data / '.import-complete.json', {'required_version': '42.21.0'})
+        self.ops.set_intent(True)
+        original = self.ops.agent
+        def upgraded(action, **kwargs):
+            if action == 'install':
+                self.assertFalse(self.proc['launching'])
+                entries = backups.catalog(self.layout)
+                self.assertEqual(entries[0]['Type'], 'pre-server-update')
+                self.assertEqual(entries[0]['Version'], '42.21.0')
+                self.proc.update(version=None, build='synthetic-new-build')
+            if action == 'start':
+                self.assertIsNone(self.proc['version'])
+                self.proc['version'] = '42.22.0'
+            return original(action, **kwargs)
+        self.ops.agent = upgraded
+        old_generation = self.proc['generation']
+        result = self.ops.execute(self.job('update'))
+        self.assertTrue(result['ready'])
+        self.assertTrue(self.ops.intent())
+        self.assertNotEqual(result['generation'], old_generation)
+        self.assertEqual(self.ops.status()['version'], '42.22.0')
+        backup = self.layout.backups / result['backup']
+        self.assertEqual(backups.verify(backup)['Version'], '42.21.0')
+        self.assertEqual(read_json(backup / 'data/.import-complete.json')['required_version'], '42.21.0')
+
+    def test_failed_update_preserves_backup_and_false_intent(self):
+        self.ops.set_intent(True)
+        original = self.ops.agent
+        def failed(action, **kwargs):
+            if action == 'install':
+                raise PZError('STEAM_INSTALL_FAILED')
+            return original(action, **kwargs)
+        self.ops.agent = failed
+        self.error('STEAM_INSTALL_FAILED', self.ops.execute, self.job('update'))
+        self.assertFalse(self.ops.intent())
+        self.assertFalse(self.proc['launching'])
+        self.assertEqual(backups.catalog(self.layout)[0]['Version'], '42.21.0')
+        self.assertFalse(any(action == 'start' for action, _ in self.calls))
+
     def test_ready_and_maintenance(self):
         self.ops.set_intent(True)
         self.assertEqual(self.ops.status()["state"], "READY")
