@@ -26,7 +26,7 @@ SYS_ADMIN/NET_ADMIN/SYS_PTRACE; die Produktdienste blieben unverändert ohne
 Capabilities und privilegierten Modus. Der separate Daemon verwendete vfs/cgroupfs.
 
 Spielversion, gelieferte JVM und GC-/JIT-Flags wurden nicht verändert. Test und
-Versionsprüfprofile liefen mit 2g, Live/Restore mit den dokumentierten **6g**.
+Versionsprüfprofile liefen mit 2g, Live/Restore mit den damals dokumentierten **6g**.
 Test- und Live-App wurden vollständig neu mit SteamCMD heruntergeladen. Für das
 dritte, unabhängige Restore-App-Volume wurden ausschließlich Vendor-Dateien der
 neuen Testinstallation als Downloadcache kopiert: keine Welt, Logs oder Linux-
@@ -97,3 +97,47 @@ Fake-Credentials ersetzt. Die unabhängigen Spielstarts hier benutzen synthetisc
 Welten ohne private Mods; die frühere menschliche Abnahme der privaten Modwelt bleibt
 im [Testbericht](TEST-REPORT.md) dokumentiert. Ein weiterer menschlicher Test ihrer
 bereits verifizierten Restorekopie wird weiterhin bewusst nicht durchgeführt.
+
+## Ergänzung: Betreiberfragen und neue Bedienbeispiele
+
+Das README verwendet nun den tatsächlichen öffentlichen origin statt einer
+Platzhalter-URL und erklärt den bestehenden CI-Workflow. Der Workflow selbst
+bleibt unverändert: synthetische Tests, Compilation, Public-tree/history-Audit
+und Compose-Grenzprüfung; kein Image-Build, Spielstart oder Deployment.
+
+Die neue .env.live.example verwendet **8g**, leere Test-/Versionsprüfprofile
+weiterhin 2g. Bestehende private Env-Dateien wurden nicht geändert. Die obigen
+realen Live-/Restore-Starts belegen weiterhin 6g; ein neuer Spielstart mit 8g
+wurde für diese Dokumentationsergänzung nicht ausgeführt.
+
+Erklärt sind der fest codierte, dauerhafte 42.21.0-Gate, die separate Linux-
+Versionsevidenz samt Steam-Build-Bindung und die Konsequenz für spätere Upgrades.
+Der Gate und die SteamCMD-Installationspolitik wurden nicht geändert. Der genaue
+Dateiweg vom Windows-Persistence-Archiv über imports/ ins Linux-Datenvolume sowie
+der spätere Linux-Backup-Export stehen getrennt im README und Handoff.
+
+Zusätzlich geprüfte Bedienbeispiele:
+
+- **INI/Lua:** tatsächlich mit Compose aus einem eigenen synthetischen Datenvolume
+  kopiert, privat bearbeitet und mit der wörtlichen Python-Transportzeile aus dem
+  README atomar zurückgeschrieben. Bytegleichheit einschließlich CRLF, Dienst-UID
+  1000 und Dateimodus 0600 bestätigt. Der kurzlebige Prüfdienst hatte kein Netzwerk,
+  keinen Host-Socket und keine privaten Datenmounts. Kein echter Spielstart für
+  diesen reinen Transportcheck.
+- **Windows-SHA/SCP:** PowerShell-Block geparst, Get-FileHash und ASCII-Sidecar mit
+  synthetischem Eingang praktisch ausgeführt; Produkt-Checksum-Prüfer akzeptiert
+  den Sidecar. SCP-Argumente mit lokalem Ersatz geprüft; kein weiterer SSH-Transfer.
+- **Mod-Pläne:** Add-/Remove-/Reihenfolge-/Pending-Ablauf anhand des vorhandenen
+  Lifecycle-Codes dokumentiert; synthetischer JSON-Plan durch Produktparser und
+  Vorschau geprüft. Die bestehenden Apply-/Ack-Regressionen wurden erneut ausgeführt.
+- **Statische Prüfung:** 24 Bash-Blöcke mit echtem Bash -n, 17 lokale Markdown-
+  Links und alle vier öffentlichen Env-/Compose-Beispiele geprüft. Live löst
+  für Server/Ops auf 8g auf, Test/Versionsprüfung auf 2g.
+- **Regression:** Windows **115 Tests PASS, 6 Skips**; Linux/Python 3.12 mit den
+  festgelegten Discord-Abhängigkeiten **115 Tests PASS, 1 Skip**. Compilation und
+  Public-tree/history-Audit erneut bestanden.
+
+Die Linux-Regression lief ohne Netzwerk mit einer Kopie ausschließlich öffentlicher
+Code-/Testdateien im Container. Der eigene Container für den Konfigurationstransport
+ist entfernt; dessen synthetisches Testvolume bleibt erhalten. Frühere private
+Quelldaten, Testwelten und Archive wurden für diese Ergänzung nicht verwendet.

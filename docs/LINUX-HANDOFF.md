@@ -30,6 +30,9 @@ Die vollständigen Bash-Befehle stehen im [deutschen README](../README.md):
 Live und dauerhafter Test haben getrennte **App-, Workshop-, Daten-, State-,
 Control-, Backup- und Logvolumes sowie Secretdateien**. Kein neuer Host benötigt
 Docker Desktop, WSL, PowerShell oder private Dateien aus der bisherigen Testphase.
+Die aktuelle .env.live.example setzt PZ_HEAP=8g; Test/Versionsprüfung verwenden 2g.
+Bestehende private .env.live-Dateien bei Bedarf selbst anpassen. Die historische
+Live-/Restore-Abnahme wurde mit 6g durchgeführt.
 
 ## 2. Aktuellen Windows-Stand kontrolliert einfrieren
 
@@ -65,6 +68,14 @@ Neben szs-final.tar.gz einen privaten szs-final.tar.gz.sha256 erzeugen, entweder
 mit dem einzelnen SHA-256-Wert oder der Zeile HASH  szs-final.tar.gz. Das schützt
 die Übertragung; Linux prüft zusätzlich enthaltene Dateien und Datenbanken.
 Archiv und Sidecar bleiben außerhalb von Git.
+
+Der konkrete Dateiweg ist Windows-Instanz C:\PZ\instances\szs → privater
+Windows-Transferordner (z.B. C:\PZ-Transfer) → SCP/SFTP → Debian
+~/pz-docker-server/imports/szs-final.tar.gz samt Sidecar → Import ins neue
+Docker-Volume pzlive_data. Die manuelle PowerShell-SHA-/SCP-Befehlsfolge steht
+in [README, Abschnitt 7](../README.md#7-finale-windows-welt-als-privaten-file-drop-importieren).
+Es wird keine Windows-Helferdatei erzeugt. Das Archiv bleibt als Eingang auf dem
+Linux-Host; das Spiel benutzt danach die entpackten Daten im Volume.
 
 **Wird nach dem Export erneut gespielt, ist das Archiv nur noch historisch.
 Nach dem letzten Spielbetrieb erneut speichern, vollständig stoppen und frisch
@@ -138,6 +149,11 @@ Reboot-Intent und optionales Discord stehen im README. Restore startet nicht
 automatisch. Eine unterbrochene Publikation bleibt durch ihr Journal gesperrt;
 Originalarchiv in ein neues Ziel übernehmen statt Marker zu entfernen.
 Code-Rollback ersetzt keine Weltwiederherstellung und bewirkt keinen Steam-Downgrade.
+Der spätere Linux-Export erzeugt aus einem Linux-Backup ein portables Archiv unter
+~/pz-docker-server/exports/ samt SHA-Sidecar; diese beiden Dateien für einen weiteren
+Handoff herunterladen und auf dem nächsten Linux-Host mit restore --archive einlesen.
+INI-/Lua-Bearbeitung und Mod-Add/Remove-Pläne sind in README, Abschnitt 9,
+als eigene Bedienabläufe beschrieben.
 
 Die bereits geprüfte private Restore-Kopie bekommt bewusst keinen separaten
 menschlichen Client-Test mehr; das ist kein Migrationsblocker. Noch ausstehend

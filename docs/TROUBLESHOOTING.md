@@ -92,7 +92,7 @@ change triggers automatic restart by itself. READY alone does not establish ever
 mod's functional correctness. Check case-sensitive paths, missing scripts, Lua,
 model/media errors and compare with the prior platform's baseline.
 
-For a 6 GiB imported-world heap, measure both host free RAM and Docker memory
+For the default 8 GiB live heap, measure both host free RAM and Docker memory
 before starting. Leave additional room for the JVM's native allocations and host
 applications. Do not infer host headroom from guest MemAvailable alone or lower
 the imported-world heap merely to complete acceptance. A disposable empty test

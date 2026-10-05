@@ -32,7 +32,7 @@ Bedienbeispiele, die jeweils bewusst ausgewählt werden.
 - Internet für SteamCMD/Workshop und genügend freien SSD-Speicher. Plane Platz
   für zwei Spielinstallationen, Workshop, Welt, Importstaging und mehrere Backups;
   mindestens das Mehrfache der entpackten Welt zusätzlich zur Installation.
-- Für Live ist ein **6-GiB-Java-Heap** vorgesehen, dazu native JVM-/Mod-Speicher,
+- Für Live ist standardmäßig ein **8-GiB-Java-Heap** vorgesehen, dazu native JVM-/Mod-Speicher,
   Betriebssystem und Container. 16 GiB Host-RAM sind ein sinnvoller Ausgangspunkt,
   keine Garantie für beliebige Mods. Messe freie Ressourcen vor dem Start.
 - Der leere Testserver verwendet 2 GiB Heap und eigene persistente Volumes.
@@ -101,12 +101,12 @@ erläutert Gruppenrechte und Start beim Booten.
 
 ## 3. Repository und zwei Instanzen vorbereiten
 
-Die Git-URL durch die tatsächlich bereitgestellte URL ersetzen. Im lokalen
-Übergaberepository ist bereits ein GitHub-origin eingerichtet; dessen private
-URL wird hier nicht übernommen. Diese Finalisierung führt keinen Push aus.
+Die folgende URL ist der origin dieses öffentlichen Repositorys. Klonen über HTTPS
+benötigt für das Lesen keine GitHub-Tokens. Private Welten und Secrets kommen
+separat; sie sind auch nach dem Klonen nicht vorhanden.
 
 ```bash
-PZ_REPOSITORY_URL='https://github.com/DEIN_ACCOUNT/pz-docker-server.git'
+PZ_REPOSITORY_URL='https://github.com/hohnbaum/zomboid-docker-server.git'
 git clone "$PZ_REPOSITORY_URL" pz-docker-server
 cd pz-docker-server
 cp .env.test.example .env.test
@@ -129,7 +129,13 @@ Exports Schreibrechte für GID 1000. Keine Secrets werden im Terminal ausgegeben
 | Profil | Zweck | Spiel/Workshop/Daten/State/Backups | Heap |
 | --- | --- | --- | --- |
 | .env.test | Dauerhafter, bei Bedarf genutzter leerer pztest | Eigenständig, Projekt pztest | 2g |
-| .env.live | Importierte Produktionswelt szs | Eigenständig, Projekt pzlive | 6g |
+| .env.live | Importierte Produktionswelt szs | Eigenständig, Projekt pzlive | 8g |
+
+`PZ_HEAP=8g` in .env.live setzt beim nächsten Spielstart sowohl Java -Xms als auch
+-Xmx auf 8 GiB. Bereits angelegte .env.live-Dateien werden durch ein Git-Update
+nicht geändert: dort den Wert bei Bedarf selbst anpassen. Der leere Test und die
+temporäre Versionsprüfung bleiben bei 2g. Die bisherige Live-/Restore-Abnahme lief
+mit 6g; 8g ist die neue Vorgabe, kein zusätzlich abgenommener Spielstart.
 
 Beide Beispiele verwenden **16261:16261/udp und 16262:16262/udp**, gebunden an
 0.0.0.0 für einen externen Client. Prüfe und passe die private Konfiguration an.
@@ -266,7 +272,47 @@ die zwei Volumennamen im Versionsprüfprofil entsprechend anpassen.
 Nur bei bestätigter **42.21.0** fortfahren. Ein späterer anderer Steam-Build braucht
 neue passende Evidenz; alte Logs oder geänderte Hashes ersetzen diese nicht.
 
+### Was der Versions-Gate tatsächlich prüft
+
+Für importierte Welten ist **42.21.0 fest im Code vorgegeben**, nicht als
+änderbare VERSION-Umgebungsvariable. Der Import schreibt required_version=42.21.0
+in private Migrationsmarker. Vor einem neuen Spielstart prüft
+[server/agent.py](server/agent.py), dass sowohl dieser Marker als auch die
+nachgewiesene installierte Spielversion exakt 42.21.0 sind; sonst BLOCKED_VERSION.
+Auch ein veränderter Marker auf eine andere Version wird verweigert.
+
+Die tatsächlich installierte Version stammt aus der ersten version=-Meldung
+eines vom Linux-Agent gestarteten Spielprozesses. Die Evidenz wird auf dem
+App-Volume gespeichert und an die Steam-Build-ID aus appmanifest_380870.acf
+gebunden. Ändert sich die Build-ID, zählt die alte Evidenz nicht mehr. Deshalb
+startet die leere Versionsprüfung zuerst genau diese App-Installation, bevor sie
+die importierte Welt laden darf. Kopierte Windows-Logs zählen nicht.
+
+Das ist **kein Vergleich mit der Client-Version oder der neuesten Steam-Version**.
+SteamCMD installiert den verfügbaren Build; der Gate pinnt und lädt keinen alten
+Build herunter. Die Steam-Updateprüfung im Betrieb ist davon unabhängig.
+Ein anderer Build mit nachgewiesener Version 42.21.0 kann passieren; eine neue
+Spielversion wie 42.22.0 bleibt für importierte Welten gesperrt. Der Gate gilt auch
+nach dem Erststart und für wiederhergestellte Importwelten. Für ein späteres
+Versionsupgrade muss diese Code-Vorgabe bewusst weiterentwickelt und die Migration
+getestet werden; eine Änderung in .env.live genügt nicht. Frische leere Testwelten
+ohne Migrationsmarker unterliegen diesem Gate nicht.
+
 ## 7. Finale Windows-Welt als privaten File-Drop importieren
+
+Der Weg der privaten Dateien ist:
+
+| Schritt | Rechner und Pfad | Ergebnis |
+| --- | --- | --- |
+| Export der gestoppten Quelle | Windows: `C:\PZ\instances\szs` → privater Transferordner | szs-final.tar.gz und szs-final.tar.gz.sha256 |
+| Übertragung mit SCP/SFTP | Windows-Transferordner → Debian: ~/pz-docker-server/imports/ | Beide Dateien liegen auf dem Linux-Host, außerhalb von Git |
+| Import | Debian: ./pz --env-file .env.live import | Validierte Welt im Docker-Volume pzlive_data; noch gestoppt |
+| Späterer Linux-Export | Debian: Backup → exports/private-handoff.tar.gz | Portables Backup mit Manifest und SHA-Sidecar, siehe Abschnitt 10 |
+
+Windows-Export ist das Archivieren der bisherigen Instanz. Linux-Import liest
+dieses Archiv und richtet die neue Live-Welt ein. Der spätere Linux-Export wird
+aus einem Linux-Betriebsbackup erzeugt und enthält zusätzlich portable
+Verwaltungsprovenienz. Keines dieser Archive gehört in Git.
 
 **Die schon abgenommene Docker-Testkopie und alte Testarchive sind nicht die finale
 Quelle.** Vor dem endgültigen Umzug am alten Windows-Server alle Spieler abmelden,
@@ -299,8 +345,28 @@ Ein SHA-256-Sidecar `szs-final.tar.gz.sha256` enthält als einzelne ASCII-/UTF-8
 Textzeile entweder den Hash allein oder `HASH  szs-final.tar.gz` (kein UTF-16).
 Archiv und Sidecar separat von Git übertragen, z.B.:
 
+**Auf Windows:** Im vorhandenen Archivwerkzeug als Quelle den gestoppten Ordner
+`C:\PZ\instances\szs` öffnen und ausschließlich Server/, Saves/, db/, Lua/
+und options.ini auswählen. Lua-Diagnose-.log-Dateien weglassen. Als tar.gz im
+privaten Transferordner speichern, beispielsweise `C:\PZ-Transfer\szs-final.tar.gz`.
+Die fünf Einträge müssen direkt an der Archivwurzel stehen, nicht unter szs/.
+Den SHA-256-Wert mit Get-FileHash ermitteln und einen ASCII-Sidecar erstellen:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$PzArchive = 'C:\PZ-Transfer\szs-final.tar.gz'
+$PzHash = (Get-FileHash -LiteralPath $PzArchive -Algorithm SHA256).Hash
+[System.IO.File]::WriteAllText($PzArchive + '.sha256', $PzHash + "`n", [System.Text.Encoding]::ASCII)
+scp $PzArchive ($PzArchive + '.sha256') BENUTZER@SERVER:~/pz-docker-server/imports/
+if ($LASTEXITCODE -ne 0) { throw 'SCP-Übertragung fehlgeschlagen' }
+```
+
+BENUTZER@SERVER vorher ersetzen. Das sind manuelle Transferbefehle, kein neuer
+Windows-Exporthelfer. Bei SFTP dieselben beiden Dateien in imports/ hochladen.
+Wenn das Archiv auf einem anderen Rechner liegt, dort stattdessen:
+
 ```bash
-# Auf dem Rechner mit dem privaten Archiv; Platzhalter ersetzen.
+# Auf dem Rechner mit dem privaten Archiv, aus dessen Transferordner.
 scp szs-final.tar.gz szs-final.tar.gz.sha256 BENUTZER@SERVER:~/pz-docker-server/imports/
 ```
 
@@ -428,6 +494,117 @@ bekannte null Spieler. Bei Importdaten bleibt auch nach einem Update der 42.21.0
 Gate bestehen. Ein anderer installierter Build kann daher den Wiederstart blockieren;
 vor einem geplanten Versionswechsel Kompatibilität und Wiederherstellung vorbereiten.
 
+### INI und Lua bearbeiten
+
+Die aktiven Dateien liegen im Docker-Datenvolume, im Container unter
+/pz/data/Server/: szs.ini, szs_SandboxVars.lua, szs_spawnpoints.lua und
+szs_spawnregions.lua. .env.live enthält Deploymentwerte wie Heap und Ports;
+Sandbox-/Servereinstellungen stehen in diesen INI-/Lua-Dateien. Lua/ ist dagegen
+Mod-Persistenz und kein Ersatz für Server/szs_SandboxVars.lua.
+
+Vorher alle Spieler abmelden. Die Controls bleiben für diese Arbeit gestartet;
+nur der Spielprozess wird gestoppt. Das Beispiel bearbeitet SandboxVars:
+Es setzt voraus, dass config-state keinen offenen Mod-Plan (pending=false) meldet;
+einen vorhandenen Plan zuerst über dessen frischen Start/Recovery abschließen.
+
+```bash
+./pz --env-file .env.live stop
+./pz --env-file .env.live backup
+./pz --env-file .env.live maintenance on --reason 'INI/Lua bearbeiten'
+./pz --env-file .env.live config-state
+
+umask 077
+mkdir -p runtime/live-config
+PZ_CONFIG_FILE=szs_SandboxVars.lua
+docker compose --env-file .env.live cp "pz-ops:/pz/data/Server/$PZ_CONFIG_FILE" "runtime/live-config/$PZ_CONFIG_FILE"
+nano "runtime/live-config/$PZ_CONFIG_FILE"
+docker compose --env-file .env.live exec -T pz-ops python -c 'import sys; from pathlib import Path; from pzops.util import atomic_bytes; atomic_bytes(Path("/pz/data/Server") / sys.argv[1], sys.stdin.buffer.read())' "$PZ_CONFIG_FILE" < "runtime/live-config/$PZ_CONFIG_FILE"
+
+./pz --env-file .env.live config-state
+./pz --env-file .env.live maintenance off
+./pz --env-file .env.live start
+./pz --env-file .env.live health
+./pz --env-file .env.live config-state
+```
+
+Für allgemeine INI-Einstellungen PZ_CONFIG_FILE=szs.ini setzen; für Spawn-Lua
+entsprechend einen der beiden anderen genannten Dateinamen. Nur existierende
+Dateien der aktiven Instanz bearbeiten. runtime/ ist gitignoriert und bleibt
+privat: insbesondere die INI kann Passwörter enthalten. Der Rücktransfer schreibt
+atomar als Dienst-UID 1000; keine Volume-Mounts auf dem Host direkt bearbeiten.
+Der Start übernimmt die neue Konfiguration und bestätigt die Baseline erst nach
+frischem READY. config-state sollte dann none und pending=false melden.
+Es gibt keine vorgezogene vollständige Prüfung der Lua-Syntax oder Mod-Kompatibilität;
+bei Startfehlern Job und private Logs prüfen und das zuvor erzeugte Backup bewahren.
+
+WorkshopItems, Mods und Map in der INI über den folgenden Mod-Plan ändern.
+config-commit speichert nur den aktuellen Konfigurationsstand als Baseline;
+es lädt keine Einstellungen ins Spiel und kann keinen offenen Mod-Plan bestätigen.
+Beim obigen Ablauf ist es nicht nötig, weil der erfolgreiche frische Start
+die Baseline bereits bestätigt.
+
+### Mods hinzufügen oder entfernen
+
+Ein Workshop-Item hat eine numerische Workshop-ID; ein enthaltenes Mod hat eine
+eigene Mod-ID. Ein Item kann mehrere Mods/Varianten enthalten. Die gewünschten
+IDs und Abhängigkeiten vorab bestimmen; es wird keine Variante automatisch gewählt.
+Planschlüssel Add/RemoveWorkshopItems betreffen Downloads, Add/RemoveMods die
+aktivierten Mods, Add/RemoveMaps die Kartenreihenfolge (INI-Schlüssel Map).
+
+Eine private JSON-Datei unter imports/private-plan.json anlegen. Dieses Beispiel
+ist synthetisch: **alle IDs vor Apply durch die tatsächlich gewünschten ersetzen**.
+Nicht benötigte Add-/Remove-Zeilen weglassen; zum reinen Entfernen nur Remove-Zeilen
+verwenden, zum reinen Hinzufügen nur Add-Zeilen:
+
+```json
+{
+  "Description": "Modwechsel nach Betreiberprüfung",
+  "RemoveWorkshopItems": ["100"],
+  "RemoveMods": ["OldExampleMod"],
+  "AddWorkshopItems": ["300"],
+  "AddMods": ["NewExampleMod"]
+}
+```
+
+Ein Workshop-Item erst entfernen, wenn daraus kein aktivierter Mod mehr benötigt
+wird. Before/After können die Ladereihenfolge von Mods/Karten gezielt festlegen,
+z.B. {"Id": "NewExampleMod", "Before": "ExistingExampleMod"}; der Anker muss
+vorhanden sein. Kartenänderungen und das Entfernen weltrelevanter Mods benötigen
+eine passende Kompatibilitätsprüfung; das Planformat kann deren Spielwirkung nicht
+automatisch beweisen. Details: [Mod-Planformat](docs/MOD-PLAN-LIFECYCLE.md).
+
+Vorher alle Spieler abmelden. Für den vorbereiteten und geprüften Plan:
+
+```bash
+./pz --env-file .env.live stop
+./pz --env-file .env.live backup
+./pz --env-file .env.live maintenance on --reason 'Mods ändern'
+nano imports/private-plan.json
+./pz --env-file .env.live apply-mod-plan imports/private-plan.json
+```
+
+Die Vorschau zeigt Before und Expected einschließlich Reihenfolge. Nur wenn diese
+genau der gewünschten Änderung entsprechen, die nächsten Befehle ausführen:
+
+```bash
+./pz --env-file .env.live apply-mod-plan imports/private-plan.json --apply
+./pz --env-file .env.live config-state
+./pz --env-file .env.live maintenance off
+./pz --env-file .env.live start
+./pz --env-file .env.live health
+./pz --env-file .env.live workshop-status
+./pz --env-file .env.live config-state
+```
+
+Apply schreibt die INI samt unveränderlicher Plan-/Vorher-Provenienz und setzt
+pending; es startet und lädt noch nichts herunter. Der frische Start prüft die
+exakten erwarteten Mod-/Workshop-/Kartenlisten, erstellt bei Pending ein zusätzliches
+Safety-Backup und lässt PZ die benötigten Workshop-Inhalte laden. Erst nach READY
+wird pending bestätigt und entfernt. Bei Fehlschlag bleibt es bestehen; nicht
+durch config-commit oder Löschen von Markern umgehen. Danach die Änderung mit dem
+Client prüfen. Bereits heruntergeladene, entfernte Items können im Cache bleiben;
+das Entfernen im Plan ist keine Cache-Bereinigung.
+
 ## 10. Export, Restore und Rollback
 
 Diese Abläufe bei einem geplanten Handoff oder einer Wiederherstellung ausführen.
@@ -445,6 +622,14 @@ docker compose --env-file .env.live stop pz-ops pz-server
 sudo chown "$(id -u):1000" exports/private-handoff.tar.gz exports/private-handoff.tar.gz.sha256
 sudo chmod 640 exports/private-handoff.tar.gz exports/private-handoff.tar.gz.sha256
 ```
+
+Das ist der **spätere Export vom Linux-Server**, unabhängig vom Windows-Export
+in Abschnitt 7. Quelle ist BACKUP_NAME im privaten Backupvolume; Ziel sind
+~/pz-docker-server/exports/private-handoff.tar.gz und dessen .sha256-Datei auf
+dem Linux-Host. Beide Dateien für die Übergabe vom Linux-Host herunterladen
+(z.B. per SFTP), auf dem nächsten Host unter imports/ hochladen und dort mit
+restore --archive wiederherstellen. Lokaler Restore kann direkt exports/ lesen,
+wie im folgenden Beispiel.
 
 Der Export liefert tar.gz und externen .sha256-Sidecar; interne Manifest-/Metadata-
 Dateien bleiben im Archiv. Git allein kann eine private Welt nicht wiederherstellen.
@@ -576,8 +761,29 @@ Welt erneut gestartet oder produktiv exportiert.
 Details: [README-Befehlsprüfung](docs/README-CHECK.md), [Abnahme und Tests](docs/TEST-REPORT.md), [Linux/Cutover-Handoff](docs/LINUX-HANDOFF.md),
 [Datenvertrag](docs/DATA-MIGRATION.md), [Architektur](docs/ARCHITECTURE.md),
 [Mod-Lifecycle](docs/MOD-PLAN-LIFECYCLE.md), [Recovery](docs/TROUBLESHOOTING.md).
+
+### Was GitHub CI prüft
+
+Der Workflow [Synthetic validation](.github/workflows/ci.yml) läuft bei jedem Push
+und Pull Request auf einem GitHub-Ubuntu-Runner mit Python 3.12. Er:
+
+- checkt die vollständige Git-Historie aus und installiert die festgelegten
+  Discord-Abhängigkeiten aus discord/requirements.lock;
+- führt python -m unittest discover -s tests -v mit synthetischen Daten aus;
+- kompiliert ops, server, discord, scripts und tests mit compileall;
+- prüft die getrackten Dateien und die gesamte Historie mit audit-public-tree.py
+  auf verbotene Runtime-/Weltdateien und erkannte Secret-/Privatwertmuster;
+- löst Compose mit den Profilen discord und tools auf und prüft mit check-compose.py
+  unter anderem UDP-Portgrenzen, Netztrennung, Capability-Drops und fehlende
+  privilegierte Dienste bzw. Docker-Socket-Mounts.
+
+Die CI baut/publiziert keine Docker-Images, installiert kein PZ, startet keinen
+Spielserver und macht kein Deployment. Ein grüner Lauf belegt die Code-/Strukturtests,
+keinen aktuellen Steam-/Workshop-Download oder menschlichen Client-Test. Der
+Muster-Audit ist keine Garantie, beliebige neue Secrets automatisch zu erkennen.
+
 Vor einem späteren Push Tests und `python3 scripts/audit-public-tree.py --history`
-ausführen; nur Code veröffentlichen. CI verwendet ausschließlich synthetische Daten.
+auch lokal ausführen; nur Code veröffentlichen.
 
 Für einen späteren Push vorhandenen origin und Repository-Berechtigungen privat
 prüfen und Git-Zugriff per SSH oder bestehender Git-Anmeldung sicherstellen:
